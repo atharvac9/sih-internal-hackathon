@@ -121,27 +121,39 @@ export const SiteInspector: React.FC<SiteInspectorProps> = ({
 
         {/* Telemetry Details */}
         {analysis && (
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-              <div className="text-[11px] text-slate-500 uppercase font-mono">NDVI (Vegetation)</div>
-              <div className="text-base font-bold font-mono text-slate-900 mt-1">
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="text-[10px] text-slate-500 uppercase font-mono">NDVI (Veg)</div>
+              <div className="text-sm font-bold font-mono text-slate-900 mt-1">
                 {analysis.ndvi_tnow?.toFixed(3) ?? "N/A"}
               </div>
               {analysis.ndvi_t0 !== null && (
-                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                  Baseline: {analysis.ndvi_t0.toFixed(3)}
+                <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                  T0: {analysis.ndvi_t0.toFixed(3)}
                 </div>
               )}
             </div>
 
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-              <div className="text-[11px] text-slate-500 uppercase font-mono">NDWI (Water Index)</div>
-              <div className="text-base font-bold font-mono text-slate-900 mt-1">
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="text-[10px] text-slate-500 uppercase font-mono">NDWI (B3-B8)</div>
+              <div className="text-sm font-bold font-mono text-slate-900 mt-1">
                 {analysis.ndwi_tnow?.toFixed(3) ?? "N/A"}
               </div>
               {analysis.ndwi_t0 !== null && (
-                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                  Baseline: {analysis.ndwi_t0.toFixed(3)}
+                <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                  T0: {analysis.ndwi_t0.toFixed(3)}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="text-[10px] text-slate-500 uppercase font-mono">MNDWI (B3-B11)</div>
+              <div className="text-sm font-bold font-mono text-slate-900 mt-1">
+                {analysis.mndwi_tnow?.toFixed(3) ?? (analysis.ndwi_tnow?.toFixed(3) ?? "N/A")}
+              </div>
+              {analysis.mndwi_t0 !== null && analysis.mndwi_t0 !== undefined && (
+                <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                  T0: {analysis.mndwi_t0.toFixed(3)}
                 </div>
               )}
             </div>

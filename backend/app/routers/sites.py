@@ -40,6 +40,8 @@ def _serialize_analysis(latest: Optional[AnalysisResult]) -> Optional[dict]:
             "ndvi_tnow": latest.ndvi_tnow,
             "ndwi_t0": latest.ndwi_t0,
             "ndwi_tnow": latest.ndwi_tnow,
+            "mndwi_t0": getattr(latest, "mndwi_t0", None),
+            "mndwi_tnow": getattr(latest, "mndwi_tnow", None),
             "satellite_agreement": latest.satellite_agreement,
             "photo_agreement": latest.photo_agreement,
             "overall_status": latest.overall_status,

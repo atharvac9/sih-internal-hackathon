@@ -11,8 +11,8 @@ interface HealthGaugeProps {
 export const HealthGauge: React.FC<HealthGaugeProps> = ({
   score = 0,
   grade = "N/A",
-  ndviDelta = 0,
-  ndwiDelta = 0,
+  ndviDelta = null,
+  ndwiDelta = null,
   status = "inconclusive",
 }) => {
   const safeScore = Math.max(0, Math.min(100, Math.round(score ?? 0)));
@@ -88,30 +88,36 @@ export const HealthGauge: React.FC<HealthGaugeProps> = ({
       </div>
 
       {/* Deltas */}
-      <div className="w-full grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-strata-mid text-[12px]">
-        <div className="bg-strata/50 rounded p-1.5 border border-strata-mid">
-          <div className="text-[10px] text-basalt-light/50 font-medium">Δ NDVI</div>
-          <div
-            className={`font-semibold tabular-nums ${
-              (ndviDelta ?? 0) >= 0 ? "text-canopy" : "text-danger"
-            }`}
-          >
-            {(ndviDelta ?? 0) >= 0 ? "+" : ""}
-            {(ndviDelta ?? 0).toFixed(3)}
-          </div>
-        </div>
+      <div className="w-full mt-2 pt-2 border-t border-strata-mid text-[11px]">
+        {ndviDelta !== null || ndwiDelta !== null ? (
+          <div className="w-full grid grid-cols-2 gap-2">
+            <div className="bg-strata/50 rounded p-1.5 border border-strata-mid">
+              <div className="text-[10px] text-basalt-light/50 font-medium">Δ NDVI</div>
+              <div
+                className={`font-semibold tabular-nums ${
+                  ndviDelta !== null && ndviDelta >= 0 ? "text-canopy" : "text-danger"
+                }`}
+              >
+                {ndviDelta !== null ? `${ndviDelta >= 0 ? "+" : ""}${ndviDelta.toFixed(3)}` : "No baseline"}
+              </div>
+            </div>
 
-        <div className="bg-strata/50 rounded p-1.5 border border-strata-mid">
-          <div className="text-[10px] text-basalt-light/50 font-medium">Δ NDWI</div>
-          <div
-            className={`font-semibold tabular-nums ${
-              (ndwiDelta ?? 0) >= 0 ? "text-sentinel" : "text-danger"
-            }`}
-          >
-            {(ndwiDelta ?? 0) >= 0 ? "+" : ""}
-            {(ndwiDelta ?? 0).toFixed(3)}
+            <div className="bg-strata/50 rounded p-1.5 border border-strata-mid">
+              <div className="text-[10px] text-basalt-light/50 font-medium">Δ NDWI</div>
+              <div
+                className={`font-semibold tabular-nums ${
+                  ndwiDelta !== null && ndwiDelta >= 0 ? "text-sentinel" : "text-danger"
+                }`}
+              >
+                {ndwiDelta !== null ? `${ndwiDelta >= 0 ? "+" : ""}${ndwiDelta.toFixed(3)}` : "No baseline"}
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-strata/40 rounded p-1.5 border border-strata-mid text-center text-slate-500 font-mono text-[11px]">
+            No baseline
+          </div>
+        )}
       </div>
     </div>
   );

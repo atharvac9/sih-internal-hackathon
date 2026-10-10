@@ -306,17 +306,18 @@ def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
 
     # Spectral indices
     ndvi = nir.subtract(red).divide(nir.add(red)).rename("NDVI")
-    mndwi = green.subtract(swir1).divide(green.add(swir1)).rename("MNDWI")
+    ndwi = green.subtract(nir).divide(green.add(nir)).rename("NDWI")      # Classical McFeeters NDWI
+    mndwi = green.subtract(swir1).divide(green.add(swir1)).rename("MNDWI") # Modified NDWI (Xu)
     ndbi = swir1.subtract(nir).divide(swir1.add(nir)).rename("NDBI")
 
     # Optional water-quality proxies
     ndti = red.subtract(green).divide(red.add(green)).rename("NDTI")
     ndci = red_edge.subtract(red).divide(red_edge.add(red)).rename("NDCI")
 
-    # Mean indices over the buffer
-    all_bands = ndvi.addBands(mndwi).addBands(ndbi).addBands(ndti).addBands(ndci)
-    mean_stats = all_bands.reduceRegion(
-        reducer=ee.Reducer.mean(),
+    # Median indices over the buffer
+    all_bands = ndvi.addBands(ndwi).addBands(mndwi).addBands(ndbi).addBands(ndti).addBands(ndci)
+    median_stats = all_bands.reduceRegion(
+        reducer=ee.Reducer.median(),
         geometry=roi,
         scale=scale,
         maxPixels=1e6,
@@ -348,13 +349,14 @@ def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
     total_pixels = max(1, int(area_m2 / (scale * scale)))
     valid_fraction = valid_count / total_pixels if total_pixels > 0 else 0
 
-    ndvi_val = mean_stats.get("NDVI")
-    mndwi_val = mean_stats.get("MNDWI")
-    ndbi_val = mean_stats.get("NDBI")
-    ndti_val = mean_stats.get("NDTI")
-    ndci_val = mean_stats.get("NDCI")
+    ndvi_val = median_stats.get("NDVI")
+    ndwi_val = median_stats.get("NDWI")
+    mndwi_val = median_stats.get("MNDWI")
+    ndbi_val = median_stats.get("NDBI")
+    ndti_val = median_stats.get("NDTI")
+    ndci_val = median_stats.get("NDCI")
 
-    if ndvi_val is None or mndwi_val is None:
+    if ndvi_val is None or mndwi_val is None or ndwi_val is None:
         raise ValueError(
             "Index computation returned null — region may have no valid pixels "
             "after cloud masking"
@@ -362,6 +364,7 @@ def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
 
     result = {
         "ndvi": round(float(ndvi_val), 4),
+        "ndwi": round(float(ndwi_val), 4),
         "mndwi": round(float(mndwi_val), 4),
         "ndbi": round(float(ndbi_val), 4) if ndbi_val is not None else None,
         "ndti": round(float(ndti_val), 4) if ndti_val is not None else None,
@@ -421,6 +424,7 @@ async def get_snapshot_indices(
 
         return {
             "ndvi_tnow": indices["ndvi"],
+            "ndwi_tnow": indices["ndwi"],
             "mndwi_tnow": indices["mndwi"],
             "ndbi_tnow": indices["ndbi"],
             "ndti_tnow": indices["ndti"],
@@ -435,8 +439,6 @@ async def get_snapshot_indices(
             "tnow_start_date": windows["current_start"],
             "tnow_end_date": windows["current_end"],
             "scene_count_tnow": scene_count,
-            # Legacy compatibility
-            "ndwi_tnow": indices["mndwi"],
             "source": "gee",
         }
 
@@ -523,6 +525,7 @@ async def get_full_indices(
         return {
             # T0 (baseline)
             "ndvi_t0": indices_t0["ndvi"],
+            "ndwi_t0": indices_t0["ndwi"],
             "mndwi_t0": indices_t0["mndwi"],
             "ndbi_t0": indices_t0["ndbi"],
             "water_frac_t0": indices_t0["water_frac"],
@@ -536,6 +539,7 @@ async def get_full_indices(
             "scene_count_t0": count_t0,
             # T_NOW (current)
             "ndvi_tnow": indices_tnow["ndvi"],
+            "ndwi_tnow": indices_tnow["ndwi"],
             "mndwi_tnow": indices_tnow["mndwi"],
             "ndbi_tnow": indices_tnow["ndbi"],
             "ndti_tnow": indices_tnow["ndti"],
@@ -551,14 +555,11 @@ async def get_full_indices(
             "scene_count_tnow": count_tnow,
             # Deltas
             "delta_ndvi": round(indices_tnow["ndvi"] - indices_t0["ndvi"], 4),
+            "delta_ndwi": round(indices_tnow["ndwi"] - indices_t0["ndwi"], 4),
             "delta_mndwi": round(indices_tnow["mndwi"] - indices_t0["mndwi"], 4),
             "delta_ndbi": round(indices_tnow["ndbi"] - indices_t0["ndbi"], 4)
                 if indices_tnow["ndbi"] is not None and indices_t0["ndbi"] is not None
                 else None,
-            # Legacy compatibility
-            "ndwi_t0": indices_t0["mndwi"],
-            "ndwi_tnow": indices_tnow["mndwi"],
-            "delta_ndwi": round(indices_tnow["mndwi"] - indices_t0["mndwi"], 4),
             "image_count_t0": count_t0,
             "image_count_tnow": count_tnow,
             "source": "gee",

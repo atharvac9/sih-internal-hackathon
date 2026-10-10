@@ -35,10 +35,13 @@ export interface AnalysisResult {
   health_grade: "A" | "B" | "C" | "D" | "F" | string | null;
   delta_ndvi: number | null;
   delta_ndwi: number | null;
+  delta_mndwi?: number | null;
   ndvi_t0: number | null;
   ndvi_tnow: number | null;
   ndwi_t0: number | null;
   ndwi_tnow: number | null;
+  mndwi_t0?: number | null;
+  mndwi_tnow?: number | null;
   satellite_agreement: boolean | null;
   photo_agreement: boolean | null;
   overall_status: OverallStatus | null;

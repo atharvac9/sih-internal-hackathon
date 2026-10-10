@@ -65,5 +65,9 @@ async def create_tables():
                 cols = [c["name"] for c in inspector.get_columns("analysis_results")]
                 if "schema_version" not in cols:
                     sync_conn.execute(text("ALTER TABLE analysis_results ADD COLUMN schema_version INTEGER DEFAULT 1"))
+                if "mndwi_t0" not in cols:
+                    sync_conn.execute(text("ALTER TABLE analysis_results ADD COLUMN mndwi_t0 FLOAT"))
+                if "mndwi_tnow" not in cols:
+                    sync_conn.execute(text("ALTER TABLE analysis_results ADD COLUMN mndwi_tnow FLOAT"))
 
         await conn.run_sync(migrate_schema)

@@ -59,7 +59,10 @@ async def main():
                 seeded_sites.append(s)
             await session.flush()
 
-        logger.info(f"Processing {len(seeded_sites)} seeded sites with real GEE...")
+        # Purge all existing analyses so we have only pristine, median-computed GEE data
+        from sqlalchemy import delete
+        await session.execute(delete(AnalysisResult))
+        logger.info("Purged all previous analysis rows.")
 
         for s in seeded_sites:
             logger.info(f"Querying GEE for site {s.id} ({s.description}) at ({s.lat}, {s.lon})...")
@@ -90,10 +93,12 @@ async def main():
                 mode=mode.value,
                 ndvi_tnow=sat_data.get("ndvi_tnow"),
                 ndwi_tnow=sat_data.get("ndwi_tnow"),
+                mndwi_tnow=sat_data.get("mndwi_tnow"),
                 tnow_start_date=sat_data.get("tnow_start_date"),
                 tnow_end_date=sat_data.get("tnow_end_date"),
                 ndvi_t0=sat_data.get("ndvi_t0"),
                 ndwi_t0=sat_data.get("ndwi_t0"),
+                mndwi_t0=sat_data.get("mndwi_t0"),
                 t0_start_date=sat_data.get("t0_start_date"),
                 t0_end_date=sat_data.get("t0_end_date"),
                 delta_ndvi=sat_data.get("delta_ndvi"),
@@ -110,7 +115,11 @@ async def main():
                 buffer_radius_m=s.buffer_radius_m or 250,
             )
             session.add(analysis)
-            logger.info(f" -> Successfully saved: Score {hs_res['score']} (Grade {hs_res['grade']}), Source: {sat_data.get('source')}")
+            surface_type = hs_res.get("surface_type") or hs_res.get("components", {}).get("surface_type")
+            logger.info(
+                f" -> Saved {s.id}: Score={hs_res['score']}, Grade={hs_res['grade']}, "
+                f"Surface={surface_type}, NDWI={sat_data.get('ndwi_tnow')}, MNDWI={sat_data.get('mndwi_tnow')}"
+            )
 
         await session.commit()
         logger.info("Re-analysis complete! All stale rows replaced with schema_version=2.")

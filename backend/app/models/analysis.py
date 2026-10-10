@@ -67,12 +67,14 @@ class AnalysisResult(Base):
     # T0 (baseline) — only populated in FULL mode
     ndvi_t0: Mapped[float | None] = mapped_column(Float, nullable=True)
     ndwi_t0: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mndwi_t0: Mapped[float | None] = mapped_column(Float, nullable=True)
     t0_start_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     t0_end_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     # T_NOW (current)
     ndvi_tnow: Mapped[float | None] = mapped_column(Float, nullable=True)
     ndwi_tnow: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mndwi_tnow: Mapped[float | None] = mapped_column(Float, nullable=True)
     tnow_start_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     tnow_end_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
 

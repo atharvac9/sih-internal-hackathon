@@ -210,7 +210,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-600 font-mono">
-                  {analysis?.ndwi_t0 != null ? `${analysis.ndwi_t0.toFixed(3)} → ${analysis.ndwi_tnow?.toFixed(3)}` : "10m resolution"}
+                  {analysis?.ndwi_t0 != null ? `${analysis.ndwi_t0.toFixed(3)} → ${analysis.ndwi_tnow?.toFixed(3)}` : "Snapshot (No baseline)"}
                 </div>
               </div>
             </div>
