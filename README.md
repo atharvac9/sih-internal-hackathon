@@ -79,7 +79,19 @@ Clean-water-Initiative/
 
 ## 🚀 Quick Start
 
-### Option 1: Docker Compose (Full Stack)
+### Option 1: 1-Click Launch (Windows)
+
+Simply double-click or run:
+```cmd
+run_both.bat
+```
+This automatically sets up Python dependencies, starts the FastAPI backend on `http://127.0.0.1:8000`, installs npm packages, and starts Next.js on `http://localhost:3000`.
+
+> **Note for Local Testing without GEE Keys:** If you do not have private Google Earth Engine credentials configured, copy `.env.example` to `.env` with `DEMO_MODE=true`. The system will automatically use calibrated simulation telemetry for scans and audits.
+
+---
+
+### Option 2: Docker Compose (Full Stack)
 
 ```bash
 docker compose up --build
@@ -90,7 +102,7 @@ docker compose up --build
 
 ---
 
-### Option 2: Running Locally
+### Option 3: Manual Terminal Setup
 
 #### 1. Start Backend
 
