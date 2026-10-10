@@ -7,11 +7,68 @@ Returns soft warnings (not hard rejects) when metadata is missing.
 
 import io
 import logging
+import math
 from typing import Optional
 
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+
+def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance between two GPS coordinates in kilometers."""
+    r = 6371.0  # Earth's mean radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) ** 2)
+    c = 2 * math.asin(math.sqrt(a))
+    return r * c
+
+
+def cross_check_photo_gps_against_site(
+    exif_data: dict,
+    site_lat: float,
+    site_lon: float,
+    threshold_km: float = 2.0,
+) -> dict:
+    """
+    Cross-check photo EXIF GPS coordinates against the analysed site's coordinates.
+
+    Rules:
+      - If photo has GPS and distance > 2 km:
+        add warning: "photo location doesn't match the site"
+      - If photo has no GPS:
+        add soft note, never a rejection.
+    """
+    result = dict(exif_data)
+    warnings = list(result.get("warnings", []))
+
+    if result.get("has_gps") and result.get("gps_lat") is not None and result.get("gps_lon") is not None:
+        p_lat = float(result["gps_lat"])
+        p_lon = float(result["gps_lon"])
+        dist_km = haversine_distance_km(p_lat, p_lon, site_lat, site_lon)
+        result["gps_site_distance_km"] = round(dist_km, 3)
+
+        if dist_km > threshold_km:
+            warning_msg = (
+                f"photo location doesn't match the site: photo GPS ({p_lat:.4f}°N, {p_lon:.4f}°E) "
+                f"is {dist_km:.2f} km from site ({site_lat:.4f}°N, {site_lon:.4f}°E) (limit {threshold_km:.1f} km)"
+            )
+            warnings.append(warning_msg)
+            result["gps_matches_site"] = False
+        else:
+            result["gps_matches_site"] = True
+    else:
+        result["gps_site_distance_km"] = None
+        result["gps_matches_site"] = None
+        soft_note = "Soft note: Photo contains no GPS coordinates — site location accepted from reference without rejection"
+        if not any("soft note" in w.lower() for w in warnings):
+            warnings.append(soft_note)
+
+    result["warnings"] = warnings
+    return result
 
 
 def extract_exif(image_bytes: bytes) -> dict:

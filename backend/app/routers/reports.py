@@ -197,22 +197,67 @@ async def export_pdf(site_id: str, db: AsyncSession = Depends(get_db)):
     # Generate HTML
     html_content = _generate_report_html(site, analysis, list(photos))
 
-    # Convert to PDF with WeasyPrint
+    # Convert to PDF with pure-Python ReportLab (zero system dependency on Windows)
     try:
-        from weasyprint import HTML
-        pdf_bytes = HTML(string=html_content).write_pdf()
-    except ImportError:
-        raise HTTPException(
-            status_code=500,
-            detail="WeasyPrint is not installed. Install with: pip install weasyprint",
-        )
+        from app.services.pdf_generator import generate_watershed_pdf_report
+        pdf_bytes = generate_watershed_pdf_report(site, analysis, list(photos))
     except Exception as e:
-        logger.error(f"PDF generation failed: {e}")
+        logger.error(f"PDF generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
     site_code = site.site_code or site.id[:8]
     filename = f"watershed_report_{site_code}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
 
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/analysis/{analysis_id}/pdf")
+async def export_analysis_pdf(analysis_id: str, db: AsyncSession = Depends(get_db)):
+    """Export a specific analysis result directly as a PDF report."""
+    result = await db.execute(
+        select(AnalysisResult).where(AnalysisResult.id == analysis_id)
+    )
+    analysis = result.scalar_one_or_none()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis result not found")
+
+    site = None
+    if analysis.site_id:
+        res = await db.execute(select(Site).where(Site.id == analysis.site_id))
+        site = res.scalar_one_or_none()
+
+    if site is None:
+        # Synthesize minimal site object for ad-hoc analyses
+        class MockSite:
+            id = analysis.site_id or "ad-hoc"
+            site_code = "ADHOC-SCAN"
+            description = "Ad-Hoc Spatial Scan"
+            lat = 0.0
+            lon = 0.0
+            buffer_radius_m = analysis.buffer_radius_m or 250
+        site = MockSite()
+
+    photos = []
+    if analysis.site_id:
+        res = await db.execute(
+            select(Photo)
+            .where(Photo.site_id == analysis.site_id)
+            .order_by(Photo.created_at.desc())
+        )
+        photos = list(res.scalars().all())
+
+    try:
+        from app.services.pdf_generator import generate_watershed_pdf_report
+        pdf_bytes = generate_watershed_pdf_report(site, analysis, photos)
+    except Exception as e:
+        logger.error(f"Analysis PDF generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    filename = f"analysis_report_{analysis.id[:8]}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",

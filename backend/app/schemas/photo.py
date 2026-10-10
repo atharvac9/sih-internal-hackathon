@@ -31,6 +31,7 @@ class PhotoResponse(BaseModel):
     classified: bool = False
     predicted_class: Optional[str] = None
     classification_confidence: Optional[float] = None
+    classification_error: Optional[str] = None
     all_scores: Optional[dict[str, float]] = None
     classification: Optional[ClassificationResult] = None
 

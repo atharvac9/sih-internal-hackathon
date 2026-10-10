@@ -101,17 +101,18 @@ async def auto_audit_photo(
             detail="This photograph contains no embedded EXIF GPS tags. Please specify coordinates or allow device GPS location.",
         )
 
+    # Cross-check photo GPS against target site coordinates (if GPS present)
+    exif_data = exif_checker.cross_check_photo_gps_against_site(exif_data, target_lat, target_lon)
+
     # 3. Run Computer Vision on photo pixels
     classification = None
+    classification_error = None
     try:
         classification = await classifier.classify_photo_from_bytes(image_bytes)
     except Exception as e:
         logger.error(f"Visual classification failed: {e}")
-        classification = {
-            "predicted_class": "unknown",
-            "confidence": 0.0,
-            "all_scores": {},
-        }
+        classification_error = str(e)
+        classification = None
 
     # 4. Resolve or create Site
     site = existing_site
@@ -155,10 +156,10 @@ async def auto_audit_photo(
         exif_camera_model=exif_data.get("camera_model"),
         exif_datetime=exif_data.get("capture_datetime"),
         exif_warnings_json=json.dumps(exif_data.get("warnings", [])),
-        classified=True,
-        predicted_class=classification["predicted_class"],
-        classification_confidence=classification["confidence"],
-        classification_scores_json=json.dumps(classification["all_scores"]),
+        classified=classification is not None,
+        predicted_class=classification["predicted_class"] if classification else None,
+        classification_confidence=classification["confidence"] if classification else None,
+        classification_scores_json=json.dumps(classification["all_scores"]) if classification else None,
     )
     db.add(photo)
     await db.flush()
@@ -187,6 +188,10 @@ async def auto_audit_photo(
         satellite_data=sat_data,
         classification_result=classification,
     )
+    for w in exif_data.get("warnings", []):
+        if "photo location doesn't match the site" in w:
+            validation_result["flags"].append(w)
+            validation_result["overall_status"] = "anomaly"
 
     # 8. Compute Health Score
     health_result = health_score.compute_health_score_snapshot(sat_data, classification)
@@ -200,9 +205,9 @@ async def auto_audit_photo(
         tnow_start_date=sat_data.get("tnow_start_date"),
         tnow_end_date=sat_data.get("tnow_end_date"),
         satellite_source=sat_data.get("source", "gee"),
-        predicted_class=classification["predicted_class"],
-        photo_confidence=classification["confidence"],
-        classification_scores_json=json.dumps(classification["all_scores"]),
+        predicted_class=classification["predicted_class"] if classification else None,
+        photo_confidence=classification["confidence"] if classification else None,
+        classification_scores_json=json.dumps(classification["all_scores"]) if classification else None,
         satellite_agreement=validation_result.get("satellite_agreement"),
         photo_agreement=validation_result.get("photo_agreement"),
         overall_status=validation_result["overall_status"],
@@ -218,7 +223,7 @@ async def auto_audit_photo(
     await db.refresh(analysis)
 
     # 10. Format return payload
-    photo_response = _build_photo_response(photo, exif_data, classification)
+    photo_response = _build_photo_response(photo, exif_data, classification, classification_error=classification_error)
     site_response = {
         "id": site.id,
         "site_code": site.site_code or f"SITE-{site.id[:6].upper()}",
@@ -251,8 +256,9 @@ async def auto_audit_photo(
         "overall_status": validation_result["overall_status"],
         "flags": validation_result["flags"],
         "confidence_score": validation_result.get("confidence", 0.0),
-        "classified_activity": classification["predicted_class"],
-        "classification_confidence": classification["confidence"],
+        "classified_activity": classification["predicted_class"] if classification else None,
+        "classification_confidence": classification["confidence"] if classification else None,
+        "classification_error": classification_error,
         "satellite_source": sat_data.get("source", "gee"),
         "buffer_radius_m": buffer_radius_m,
         "analyzed_at": analysis.created_at.isoformat(),
@@ -323,6 +329,9 @@ async def upload_photo(
         exif_data["warnings"] = [w for w in exif_data["warnings"] if "No GPS" not in w]
         exif_data["warnings"].append("GPS coordinates synchronized from device/site location")
 
+    # Cross-check photo GPS against site coordinates
+    exif_data = exif_checker.cross_check_photo_gps_against_site(exif_data, site.lat, site.lon)
+
     # 4. Upload to Storage
     try:
         storage_result = await storage.upload_photo(
@@ -336,11 +345,12 @@ async def upload_photo(
 
     # 5. Run real computer vision classification on the actual image pixels
     classification = None
+    classification_error = None
     try:
         classification = await classifier.classify_photo_from_bytes(image_bytes)
     except Exception as e:
         logger.error(f"Visual classification error: {e}", exc_info=True)
-        # Do not fabricate high-confidence false matches; leave unclassified or record error
+        classification_error = str(e)
         classification = None
 
     # 6. Persist photo record
@@ -371,7 +381,7 @@ async def upload_photo(
     await db.flush()
     await db.refresh(photo)
 
-    return _build_photo_response(photo, exif_data, classification)
+    return _build_photo_response(photo, exif_data, classification, classification_error=classification_error)
 
 
 @router.get("/{site_id}", response_model=PhotoListResponse)
@@ -464,6 +474,7 @@ def _build_photo_response(
     photo: Photo,
     exif_data: dict,
     classification: dict = None,
+    classification_error: Optional[str] = None,
 ) -> PhotoResponse:
     """Build response from fresh data."""
     exif_info = ExifInfo(
@@ -506,6 +517,7 @@ def _build_photo_response(
         classified=photo.classified,
         predicted_class=photo.predicted_class,
         classification_confidence=photo.classification_confidence,
+        classification_error=classification_error,
         all_scores=classification.get("all_scores", {}) if classification else (
             json.loads(photo.classification_scores_json) if photo.classification_scores_json else None
         ),

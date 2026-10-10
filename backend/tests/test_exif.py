@@ -145,3 +145,70 @@ class TestExifExtraction:
         q = _extract_address_query(text)
         assert q is not None
         assert "London" in q or "United Kingdom" in q or "UK" in q
+
+
+class TestPhotoSiteGpsCrossCheck:
+    """Unit tests for Task 3: EXIF GPS cross-check against analysed site."""
+
+    def test_gps_within_threshold_matches_cleanly(self):
+        """Photo with GPS within 2 km of site should match without mismatch warning."""
+        from app.services.exif_checker import cross_check_photo_gps_against_site
+
+        # Site at Khadakwasla Dam (18.4400, 73.7700)
+        # Photo at 0.5 km away (18.4440, 73.7720)
+        exif_data = {
+            "has_exif": True,
+            "has_gps": True,
+            "gps_lat": 18.4440,
+            "gps_lon": 73.7720,
+            "warnings": [],
+        }
+
+        checked = cross_check_photo_gps_against_site(exif_data, site_lat=18.4400, site_lon=73.7700)
+        assert checked["gps_matches_site"] is True
+        assert checked["gps_site_distance_km"] < 2.0
+        # No mismatch warning should be in warnings
+        assert not any("photo location doesn't match the site" in w for w in checked["warnings"])
+
+    def test_gps_exceeding_threshold_triggers_mismatch_warning(self):
+        """Photo with GPS > 2 km away from site must flag 'photo location doesn't match the site'."""
+        from app.services.exif_checker import cross_check_photo_gps_against_site
+
+        # Site at Khadakwasla Dam (18.4400, 73.7700)
+        # Photo taken 15 km away in downtown Pune (18.5300, 73.8500)
+        exif_data = {
+            "has_exif": True,
+            "has_gps": True,
+            "gps_lat": 18.5300,
+            "gps_lon": 73.8500,
+            "warnings": [],
+        }
+
+        checked = cross_check_photo_gps_against_site(exif_data, site_lat=18.4400, site_lon=73.7700, threshold_km=2.0)
+        assert checked["gps_matches_site"] is False
+        assert checked["gps_site_distance_km"] > 2.0
+        # Warning string must explicitly contain "photo location doesn't match the site"
+        mismatch_warnings = [w for w in checked["warnings"] if "photo location doesn't match the site" in w]
+        assert len(mismatch_warnings) > 0, "Expected warning containing 'photo location doesn't match the site'"
+
+    def test_no_gps_produces_soft_note_never_rejection(self):
+        """Photo without GPS must generate a soft note and never be marked as rejected."""
+        from app.services.exif_checker import cross_check_photo_gps_against_site
+
+        exif_data = {
+            "has_exif": False,
+            "has_gps": False,
+            "gps_lat": None,
+            "gps_lon": None,
+            "warnings": [],
+        }
+
+        checked = cross_check_photo_gps_against_site(exif_data, site_lat=18.4400, site_lon=73.7700)
+        # Never reject (gps_matches_site is None, not False)
+        assert checked["gps_matches_site"] is None
+        # Warnings must contain a soft note
+        soft_notes = [w for w in checked["warnings"] if "soft note" in w.lower()]
+        assert len(soft_notes) > 0, "Expected soft note warning for photo lacking GPS"
+        # Must not contain mismatch failure warning
+        assert not any("photo location doesn't match the site" in w for w in checked["warnings"])
+

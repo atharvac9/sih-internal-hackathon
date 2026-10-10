@@ -207,12 +207,25 @@ export const FieldUploadView: React.FC<FieldUploadViewProps> = ({ sites, onPhoto
           <div className="flex flex-col gap-4">
             <div className="bg-slate-50 p-3.5 rounded-xl border border-teal-200">
               <div className="text-[11px] uppercase font-mono text-slate-500">CLIP Classified Intervention</div>
-              <div className="text-lg font-bold font-mono text-teal-800 capitalize mt-1">
-                {result.predicted_class?.replace(/_/g, " ")}
-              </div>
-              <div className="text-xs text-emerald-700 font-mono mt-0.5">
-                {((result.classification_confidence || 0) * 100).toFixed(1)}% model certainty
-              </div>
+              {result.classification_error ? (
+                <div className="mt-1">
+                  <span className="text-xs font-semibold text-rose-600">Model Error:</span>
+                  <p className="text-[11px] text-rose-700 font-mono mt-0.5">{result.classification_error}</p>
+                </div>
+              ) : result.classified && result.classification_confidence !== null && result.classification_confidence !== undefined && result.classification_confidence > 0 ? (
+                <>
+                  <div className="text-lg font-bold font-mono text-teal-800 capitalize mt-1">
+                    {result.predicted_class?.replace(/_/g, " ")}
+                  </div>
+                  <div className="text-xs text-emerald-700 font-mono mt-0.5">
+                    {(result.classification_confidence * 100).toFixed(1)}% model certainty
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-amber-700 font-mono mt-1">
+                  Classification unavailable
+                </div>
+              )}
             </div>
 
             {/* Probability Breakdown */}

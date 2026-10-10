@@ -440,7 +440,13 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
                       {autoAuditResult.photo.predicted_class?.replace(/_/g, " ") || "Unknown"}
                     </div>
                     <div className="text-[11px] font-mono text-teal-700 font-semibold">
-                      {((autoAuditResult.photo.classification_confidence || 0) * 100).toFixed(1)}% certainty
+                      {autoAuditResult.photo.classification_error ? (
+                        <span className="text-rose-600">Model unavailable</span>
+                      ) : autoAuditResult.photo.classification_confidence !== null && autoAuditResult.photo.classification_confidence !== undefined && autoAuditResult.photo.classification_confidence > 0 ? (
+                        `${(autoAuditResult.photo.classification_confidence * 100).toFixed(1)}% certainty`
+                      ) : (
+                        "Unclassified"
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-500 font-mono mt-1 truncate">
                       📍 {autoAuditResult.photo.exif_lat?.toFixed(4)}°, {autoAuditResult.photo.exif_lon?.toFixed(4)}°
@@ -499,7 +505,7 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
                     className="flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs border border-slate-200 transition-all cursor-pointer"
                   >
                     <FileDown className="w-3.5 h-3.5" />
-                    <span>Download PDF</span>
+                    <span>Download report</span>
                   </a>
                 </div>
               </div>

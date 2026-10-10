@@ -273,3 +273,42 @@ def test_latest_analysis_get_never_500s_on_old_row(client):
     # Tolerant sites GET: must return 200, never 500
     sites_resp = client.get("/api/sites")
     assert sites_resp.status_code == 200
+
+
+def test_pdf_report_export_with_reportlab(client, monkeypatch):
+    """GET /api/reports/{site_id}/pdf produces a valid PDF using pure-Python ReportLab."""
+    async def mock_get_full_indices(lat, lon, buffer_m=250):
+        return {
+            "source": "gee",
+            "ndvi_tnow": 0.45,
+            "ndwi_tnow": 0.15,
+            "mndwi_tnow": 0.20,
+            "ndbi_tnow": -0.05,
+            "water_frac_tnow": 0.10,
+            "veg_frac_tnow": 0.60,
+            "built_frac_tnow": 0.25,
+            "barren_frac_tnow": 0.05,
+            "tnow_start_date": "2026-07-01",
+            "tnow_end_date": "2026-09-30",
+            "low_data_tnow": False,
+        }
+
+    from app.services import gee_service
+    monkeypatch.setattr(gee_service, "get_full_indices", mock_get_full_indices)
+
+    # 1. Create a site
+    site_res = client.post("/api/sites", json={"lat": 18.5, "lon": 73.8, "description": "PDF Test Site"})
+    assert site_res.status_code == 201
+    site_id = site_res.json()["id"]
+
+    # 2. Run analysis
+    ana_res = client.post(f"/api/analysis/{site_id}")
+    assert ana_res.status_code == 200
+
+    # 3. Export PDF
+    pdf_res = client.get(f"/api/reports/{site_id}/pdf")
+    assert pdf_res.status_code == 200
+    assert pdf_res.headers["content-type"] == "application/pdf"
+    assert pdf_res.content.startswith(b"%PDF-")
+    assert len(pdf_res.content) > 1000
+

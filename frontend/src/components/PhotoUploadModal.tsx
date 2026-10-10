@@ -239,15 +239,29 @@ export const PhotoUploadModal: React.FC<PhotoUploadModalProps> = ({
               <span className="text-xs font-bold text-teal-800 uppercase tracking-wider">
                 CLIP Classification Results
               </span>
-              <span className="text-xs font-mono text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                {((result.classification_confidence || 0) * 100).toFixed(1)}% Confidence
-              </span>
+              {result.classification_error ? (
+                <span className="text-xs font-mono text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  Model Error
+                </span>
+              ) : result.classification_confidence !== null && result.classification_confidence !== undefined && result.classification_confidence > 0 ? (
+                <span className="text-xs font-mono text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  {(result.classification_confidence * 100).toFixed(1)}% Confidence
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                  Unclassified
+                </span>
+              )}
             </div>
 
             <div>
               <div className="text-xs text-slate-500">Predicted Intervention:</div>
               <div className="text-base font-bold font-mono text-slate-900 capitalize mt-0.5">
-                {result.predicted_class?.replace(/_/g, " ")}
+                {result.classification_error ? (
+                  <span className="text-rose-600 text-xs font-sans font-normal">{result.classification_error}</span>
+                ) : (
+                  result.predicted_class?.replace(/_/g, " ") || "Not detected"
+                )}
               </div>
             </div>
 

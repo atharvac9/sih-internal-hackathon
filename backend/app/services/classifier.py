@@ -170,8 +170,14 @@ def classify_image(image_bytes: bytes) -> dict:
         scores[k] = round(float(scores[k] / total_score), 4)
 
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    if not sorted_scores:
+        raise RuntimeError("Vision model produced no class predictions")
+
     predicted_class = sorted_scores[0][0]
     confidence = sorted_scores[0][1]
+
+    if confidence <= 0.0:
+        raise RuntimeError(f"Vision model produced invalid zero confidence ({confidence}) for top prediction {predicted_class}")
 
     return {
         "predicted_class": predicted_class,
