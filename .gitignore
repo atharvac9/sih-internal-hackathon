@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Databases & local sqlite
+*.db
+*.sqlite
+*.sqlite3
+cache/*
+temp/
+backend/data/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+
+# Environment & IDE
+.env
+.env.local
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store

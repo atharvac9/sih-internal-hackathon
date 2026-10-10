@@ -1,0 +1,180 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* ── NeerDrishti Design System ──────────────────────────────────── */
+
+@theme {
+  /* Palette — warmer, earthier and less template-like */
+  --color-basalt: #1F1B17;
+  --color-basalt-light: #4A413B;
+  --color-reservoir: #2F5A4F;
+  --color-reservoir-light: #3B7568;
+  --color-reservoir-faint: #E8F0EC;
+  --color-sentinel: #8A6A3F;
+  --color-sentinel-faint: #F5EFE4;
+  --color-canopy: #586F3A;
+  --color-canopy-faint: #EDF2E5;
+  --color-alluvial: #BA7D52;
+  --color-alluvial-faint: #F9F1EA;
+  --color-strata: #F3EEE7;
+  --color-strata-mid: #D9D0C5;
+  --color-strata-deep: #B8A99A;
+  --color-surface: #FFFDF9;
+  --color-danger: #A84E3A;
+  --color-danger-faint: #F7E7E1;
+
+  /* Typography — more editorial, less SaaS */
+  --font-heading: "Georgia", "Times New Roman", serif;
+  --font-body: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ── Base ─────────────────────────────────────────────────────── */
+
+body {
+  font-family: var(--font-body);
+  background: linear-gradient(180deg, #f6f0e9 0%, #f7f3ef 100%);
+  color: var(--color-basalt);
+  overflow-x: hidden;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* ── Focus States ─────────────────────────────────────────────── */
+
+*:focus-visible {
+  outline: 2px solid var(--color-reservoir);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Reduced Motion ───────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-strata);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-strata-deep);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-basalt-light);
+}
+
+/* ── Leaflet Overrides ────────────────────────────────────────── */
+
+.leaflet-container {
+  background: var(--color-strata) !important;
+  font-family: var(--font-body) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: rgba(255, 255, 255, 0.97) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  border: 1px solid var(--color-strata-mid) !important;
+  color: var(--color-basalt) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px -4px rgba(27, 36, 50, 0.12) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+  line-height: 1.5 !important;
+  font-family: var(--font-body) !important;
+  font-size: 13px !important;
+}
+
+.leaflet-popup-tip {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border: 1px solid var(--color-strata-mid) !important;
+}
+
+.leaflet-tooltip {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border: 1px solid var(--color-strata-mid) !important;
+  color: var(--color-basalt) !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-family: var(--font-body) !important;
+  box-shadow: 0 4px 12px rgba(27, 36, 50, 0.08) !important;
+  padding: 4px 8px !important;
+}
+
+.leaflet-tooltip-top:before {
+  border-top-color: var(--color-strata-mid) !important;
+}
+
+.leaflet-bar {
+  border: 1px solid var(--color-strata-mid) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 8px rgba(27, 36, 50, 0.06) !important;
+}
+
+.leaflet-bar a {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  color: var(--color-basalt-light) !important;
+  border-bottom: 1px solid var(--color-strata) !important;
+}
+
+.leaflet-bar a:hover {
+  background-color: var(--color-strata) !important;
+  color: var(--color-reservoir) !important;
+}
+
+/* ── Print ────────────────────────────────────────────────────── */
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11pt !important;
+  }
+
+  header, nav, footer, .no-print, [role="dialog"]:not(.printable-dialog) {
+    display: none !important;
+  }
+
+  .printable-certificate {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    background: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
+    z-index: 999999 !important;
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "clean-water-initiative",
+  "version": "1.0.0",
+  "description": "Multi-modal watershed intelligence platform combining Sentinel-2 satellite indices with OpenCLIP field verification",
+  "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:backend": "run_backend.bat"
+  },
+  "keywords": [
+    "watershed",
+    "sentinel-2",
+    "openclip",
+    "fastapi",
+    "nextjs"
+  ],
+  "author": "Clean Water Initiative Team",
+  "license": "MIT"
+}
