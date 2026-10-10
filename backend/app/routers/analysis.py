@@ -211,8 +211,8 @@ async def analyze_adhoc(
             body.lat, body.lon, t0_start, t0_end, body.buffer_radius_m,
         )
     else:
-        sat_data = await gee_service.get_snapshot_indices(
-            body.lat, body.lon, body.buffer_radius_m,
+        sat_data = await gee_service.get_full_indices(
+            body.lat, body.lon, buffer_m=body.buffer_radius_m,
         )
 
     # Check for GEE errors — return 503 unless DEMO_MODE is true
@@ -332,8 +332,8 @@ async def analyze_site(
             site.lat, site.lon, t0_start, t0_end, site.buffer_radius_m,
         )
     else:
-        sat_data = await gee_service.get_snapshot_indices(
-            site.lat, site.lon, site.buffer_radius_m,
+        sat_data = await gee_service.get_full_indices(
+            site.lat, site.lon, buffer_m=site.buffer_radius_m,
         )
 
     if "error" in sat_data:

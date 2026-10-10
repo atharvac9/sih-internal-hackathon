@@ -119,6 +119,21 @@ export const HealthGauge: React.FC<HealthGaugeProps> = ({
           </div>
         )}
       </div>
+
+      {/* Heuristic Disclaimer & Grade Bands */}
+      <div className="w-full mt-2 pt-1.5 border-t border-slate-200/80 text-center">
+        <div className="text-[10px] text-slate-500 italic">
+          Heuristic score, not a scientific standard
+        </div>
+        <div className="flex justify-between items-center text-[9px] font-mono text-slate-500 mt-1 px-1">
+          <span className="font-semibold text-slate-600">Bands:</span>
+          <span className="text-canopy font-medium">A ≥80</span>
+          <span className="text-reservoir font-medium">B 65–79</span>
+          <span className="text-alluvial font-medium">C 50–64</span>
+          <span className="text-amber-600 font-medium">D 35–49</span>
+          <span className="text-danger font-medium">F &lt;35</span>
+        </div>
+      </div>
     </div>
   );
 };

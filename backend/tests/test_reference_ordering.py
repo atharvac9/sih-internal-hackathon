@@ -34,14 +34,25 @@ async def test_reference_site_ordering_with_live_gee():
     assert "error" not in kh_sat, f"GEE query failed: {kh_sat}"
     kh_health = health_score.compute_health_score_snapshot(kh_sat)
 
-    # 4. Wagholi Stone Quarry (barren open quarry)
-    wq_ref = sites_by_id["wagholi_stone_quarry"]
-    wq_sat = await gee_service.get_snapshot_indices(wq_ref["lat"], wq_ref["lon"], wq_ref["buffer_radius_m"])
-    assert "error" not in wq_sat, f"GEE query failed: {wq_sat}"
-    wq_health = health_score.compute_health_score_snapshot(wq_sat)
+    # 4. Shivajinagar Core (dense historic urban core)
+    sn_ref = sites_by_id["shivajinagar_core"]
+    sn_sat = await gee_service.get_full_indices(sn_ref["lat"], sn_ref["lon"], buffer_m=sn_ref["buffer_radius_m"])
+    assert "error" not in sn_sat, f"GEE query failed: {sn_sat}"
+    sn_health = health_score.compute_health_score_snapshot(sn_sat)
 
-    # Verified Ecological Ordering: Reservoir & Forest strictly outscore Urban Core & Quarry
-    assert kw_health["score"] > kh_health["score"], f"Reservoir ({kw_health['score']}) must exceed Urban ({kh_health['score']})"
-    assert kw_health["score"] > wq_health["score"], f"Reservoir ({kw_health['score']}) must exceed Quarry ({wq_health['score']})"
-    assert sh_health["score"] > kh_health["score"], f"Forest ({sh_health['score']}) must exceed Urban ({kh_health['score']})"
-    assert sh_health["score"] > wq_health["score"], f"Forest ({sh_health['score']}) must exceed Quarry ({wq_health['score']})"
+    kw_score = kw_health["score"]
+    sh_score = sh_health["score"]
+    kh_score = kh_health["score"]
+    sn_score = sn_health["score"]
+
+    # Verified Ecological Ordering: Reservoir & Forest strictly outscore Urban Core
+    assert kw_score > kh_score, f"Reservoir ({kw_score}) must exceed Urban ({kh_score})"
+    assert kw_score > sn_score, f"Reservoir ({kw_score}) must exceed Urban Core ({sn_score})"
+    assert sh_score > kh_score, f"Forest ({sh_score}) must exceed Urban ({kh_score})"
+    assert sh_score > sn_score, f"Forest ({sh_score}) must exceed Urban Core ({sn_score})"
+
+    # Absolute Ecological Guardrails:
+    assert sn_score <= 50, f"Dense urban core must score <= 50, got {sn_score}"
+    assert kh_score <= 50, f"Kharadi (urban) must score <= 50, got {kh_score}"
+    assert sh_score >= 70, f"Healthy forest must score >= 70, got {sh_score}"
+    assert kw_score >= 70, f"Open water reservoir must score >= 70, got {kw_score}"

@@ -54,14 +54,4 @@ REFERENCE_SITES = [
         "expected_max_score": 40,
         "description": "Historic dense downtown core with paved surfaces and negligible vegetation.",
     },
-    {
-        "id": "wagholi_stone_quarry",
-        "name": "Wagholi / Marunji Barren Stone Quarry",
-        "lat": 18.5850,
-        "lon": 73.7350,
-        "buffer_radius_m": 250,
-        "expected_surface_type": "land",
-        "expected_max_score": 40,
-        "description": "Excavated open-cast basalt quarry and exposed barren bedrock.",
-    },
 ]

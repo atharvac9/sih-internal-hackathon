@@ -176,6 +176,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 <div className="text-[11px] font-bold text-teal-700">
                   Grade {analysis?.health_grade || "--"}
                 </div>
+                <div className="text-[9px] text-slate-500 italic mt-0.5">
+                  Heuristic score, not a scientific standard
+                </div>
+                <div className="text-[9px] font-mono text-slate-400 mt-1">
+                  Bands: A ≥80 · B ≥65 · C ≥50 · D ≥35 · F &lt;35
+                </div>
               </div>
 
               {/* NDVI Delta */}

@@ -136,7 +136,7 @@ class TestSnapshotMode:
 
     def test_high_ndvi_high_ndwi_yields_high_score(self):
         result = compute_health_score_snapshot(
-            satellite_data={"ndvi_tnow": 0.55, "ndwi_tnow": 0.35},
+            satellite_data={"ndvi_tnow": 0.75, "ndwi_tnow": 0.35},
         )
         assert result["score"] >= 80
         assert result["grade"] == "A"

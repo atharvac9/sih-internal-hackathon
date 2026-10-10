@@ -111,10 +111,10 @@ def test_adhoc_analysis_gee_failure_returns_503(client, monkeypatch):
     """When GEE fails and DEMO_MODE is False, adhoc analysis returns 503 explicit error, not simulated data."""
     from app.config import settings
 
-    async def mock_get_snapshot(*args, **kwargs):
+    async def mock_get_full(*args, **kwargs):
         return {"error": "Earth Engine unavailable"}
 
-    monkeypatch.setattr("app.services.gee_service.get_snapshot_indices", mock_get_snapshot)
+    monkeypatch.setattr("app.services.gee_service.get_full_indices", mock_get_full)
     prev_demo = settings.demo_mode
     settings.demo_mode = False
     try:
@@ -136,10 +136,10 @@ def test_adhoc_analysis_demo_mode_returns_simulated_source(client, monkeypatch):
     """When GEE fails and DEMO_MODE is True, adhoc analysis returns 200 with source='simulated'."""
     from app.config import settings
 
-    async def mock_get_snapshot(*args, **kwargs):
+    async def mock_get_full(*args, **kwargs):
         return {"error": "Earth Engine unavailable"}
 
-    monkeypatch.setattr("app.services.gee_service.get_snapshot_indices", mock_get_snapshot)
+    monkeypatch.setattr("app.services.gee_service.get_full_indices", mock_get_full)
     prev_demo = settings.demo_mode
     settings.demo_mode = True
     try:

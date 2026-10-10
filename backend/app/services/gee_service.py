@@ -323,12 +323,13 @@ def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
         maxPixels=1e6,
     ).getInfo()
 
-    # Surface fractions (per-pixel classification, then mean = fraction)
+    # Mutually exclusive per-pixel classification with precedence: water > built-up > vegetation > barren
     is_water = mndwi.gt(0).rename("is_water")
-    is_veg = ndvi.gt(0.3).And(mndwi.lte(0)).rename("is_veg")
-    is_built = ndbi.gt(0).And(ndvi.lt(0.2)).And(mndwi.lte(0)).rename("is_built")
+    is_built = is_water.Not().And(ndbi.gt(-0.10)).And(ndvi.lt(0.45)).rename("is_built")
+    is_veg = is_water.Not().And(is_built.Not()).And(ndvi.gte(0.35)).rename("is_veg")
+    is_barren = is_water.Not().And(is_built.Not()).And(is_veg.Not()).rename("is_barren")
 
-    fractions = is_water.addBands(is_veg).addBands(is_built)
+    fractions = is_water.addBands(is_built).addBands(is_veg).addBands(is_barren)
     frac_stats = fractions.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=roi,
@@ -370,8 +371,9 @@ def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
         "ndti": round(float(ndti_val), 4) if ndti_val is not None else None,
         "ndci": round(float(ndci_val), 4) if ndci_val is not None else None,
         "water_frac": round(float(frac_stats.get("is_water", 0)), 4),
-        "veg_frac": round(float(frac_stats.get("is_veg", 0)), 4),
         "built_frac": round(float(frac_stats.get("is_built", 0)), 4),
+        "veg_frac": round(float(frac_stats.get("is_veg", 0)), 4),
+        "barren_frac": round(float(frac_stats.get("is_barren", 0)), 4),
         "valid_pixels": int(valid_count),
         "total_pixels": total_pixels,
         "valid_fraction": round(valid_fraction, 4),
@@ -430,8 +432,9 @@ async def get_snapshot_indices(
             "ndti_tnow": indices["ndti"],
             "ndci_tnow": indices["ndci"],
             "water_frac_tnow": indices["water_frac"],
-            "veg_frac_tnow": indices["veg_frac"],
             "built_frac_tnow": indices["built_frac"],
+            "veg_frac_tnow": indices["veg_frac"],
+            "barren_frac_tnow": indices["barren_frac"],
             "valid_pixels_tnow": indices["valid_pixels"],
             "total_pixels_tnow": indices["total_pixels"],
             "valid_fraction_tnow": indices["valid_fraction"],
@@ -529,8 +532,9 @@ async def get_full_indices(
             "mndwi_t0": indices_t0["mndwi"],
             "ndbi_t0": indices_t0["ndbi"],
             "water_frac_t0": indices_t0["water_frac"],
-            "veg_frac_t0": indices_t0["veg_frac"],
             "built_frac_t0": indices_t0["built_frac"],
+            "veg_frac_t0": indices_t0["veg_frac"],
+            "barren_frac_t0": indices_t0["barren_frac"],
             "valid_pixels_t0": indices_t0["valid_pixels"],
             "valid_fraction_t0": indices_t0["valid_fraction"],
             "low_data_t0": indices_t0["low_data"],
@@ -545,8 +549,9 @@ async def get_full_indices(
             "ndti_tnow": indices_tnow["ndti"],
             "ndci_tnow": indices_tnow["ndci"],
             "water_frac_tnow": indices_tnow["water_frac"],
-            "veg_frac_tnow": indices_tnow["veg_frac"],
             "built_frac_tnow": indices_tnow["built_frac"],
+            "veg_frac_tnow": indices_tnow["veg_frac"],
+            "barren_frac_tnow": indices_tnow["barren_frac"],
             "valid_pixels_tnow": indices_tnow["valid_pixels"],
             "valid_fraction_tnow": indices_tnow["valid_fraction"],
             "low_data_tnow": indices_tnow["low_data"],

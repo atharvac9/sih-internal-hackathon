@@ -64,16 +64,24 @@ def _clamp(x: float) -> float:
 
 def surface_type(f: dict) -> str:
     """
-    Classify surface type from buffer surface fractions.
-      - water: water_frac >= 0.5
-      - urban: built_frac >= 0.4
-      - land: all other surfaces
+    Classify surface type with strict mutual exclusivity & precedence:
+      water > built-up (urban) > vegetation (land) > barren.
     """
-    if f.get("water_frac", 0.0) >= 0.5:
+    water_frac = f.get("water_frac", 0.0)
+    built_frac = f.get("built_frac", 0.0)
+    veg_frac = f.get("veg_frac", 0.0)
+
+    # 1. Water: water fraction >= 0.50
+    if water_frac >= 0.50:
         return "water"
-    if f.get("built_frac", 0.0) >= 0.4:
+    # 2. Built-up / Urban: built fraction >= 0.35
+    if built_frac >= 0.35:
         return "urban"
-    return "land"
+    # 3. Vegetation / Forest / Land: vegetation fraction >= 0.40
+    if veg_frac >= 0.40:
+        return "land"
+    # 4. Barren: exposed rock, quarries, bare earth
+    return "barren"
 
 
 # Alias for backward compatibility
@@ -99,15 +107,17 @@ def compute_satellite_score(
     Compute a surface-type-aware satellite score with full component breakdown.
 
     Rules:
-      - WATER: judged on surface-area stability, never NDVI.
-        change = (now["water_frac"] - base["water_frac"]) / max(base["water_frac"], 0.05)
-        round(100 * clamp((change + 0.5) / 0.5))  # -50% loss -> 0, no loss -> 100
-      - LAND:
-        absolute = clamp((now["ndvi"] - 0.05) / 0.55)
+      - WATER: judged on surface-area stability year-over-year.
+        If baseline is absent or has low_data: score from current water extent,
+        never assume stability = 100.
+      - LAND: 0.85 NDVI ceiling so climax canopy doesn't saturate at 100:
+        absolute = clamp((now["ndvi"] - 0.10) / 0.75)
         trend = clamp(((now["ndvi"] - base["ndvi"]) + 0.2) / 0.4)
         round(100 * (0.7 * absolute + 0.3 * trend))
-      - URBAN:
-        round(100 * clamp((now["veg_frac"] + now["water_frac"]) / 0.4))
+      - URBAN: capped at 50 so built-up areas with street trees cannot score above 50:
+        round(50 * clamp((now["veg_frac"] + now["water_frac"]) / 0.4))
+      - BARREN: bare rock, quarries, dry soil capped at <= 35:
+        round(35 * clamp((now["ndvi"] - 0.05) / 0.40))
     """
     t = surface_type(now)
     components = {
@@ -115,7 +125,8 @@ def compute_satellite_score(
     }
 
     if t == "water":
-        if base is not None:
+        base_low_data = base.get("low_data", False) if base else True
+        if base is not None and not base_low_data:
             base_water = max(base.get("water_frac", 0.0), 0.05)
             now_water = now.get("water_frac", 0.0)
             change = (now_water - base_water) / base_water
@@ -126,10 +137,12 @@ def compute_satellite_score(
             components["water_frac_base"] = round(base_water, 4)
             components["water_change_pct"] = round(change * 100, 1)
         else:
+            # Low data or no baseline: score from current water extent only; never assume stable = 100
             now_water = now.get("water_frac", 0.0)
-            score = round(100 * _clamp(now_water / 0.5))
+            score = round(70 * _clamp(now_water / 0.5))
             components["water_frac_now"] = round(now_water, 4)
-            components["water_stability"] = score
+            components["water_stability"] = None
+            components["baseline_status"] = "no baseline"
 
         if now.get("ndti") is not None:
             components["turbidity_proxy_ndti"] = round(now["ndti"], 4)
@@ -138,9 +151,11 @@ def compute_satellite_score(
 
     elif t == "land":
         ndvi_now = now.get("ndvi", 0.0)
-        absolute = _clamp((ndvi_now - 0.05) / 0.55)
+        # 0.85 NDVI ceiling prevents dense canopy from saturating at 100
+        absolute = _clamp((ndvi_now - 0.10) / 0.75)
 
-        if base is not None:
+        base_low_data = base.get("low_data", False) if base else True
+        if base is not None and not base_low_data:
             ndvi_base = base.get("ndvi", 0.0)
             delta = ndvi_now - ndvi_base
             trend = _clamp((delta + 0.2) / 0.4)
@@ -155,14 +170,21 @@ def compute_satellite_score(
             components["absolute_ndvi_condition"] = round(100 * absolute, 1)
             components["ndvi_now"] = round(ndvi_now, 4)
 
-    else:  # urban
+    elif t == "urban":
+        # Built-up area with street trees cannot score above about 50
         veg_frac = now.get("veg_frac", 0.0)
         water_frac = now.get("water_frac", 0.0)
         green_blue = veg_frac + water_frac
-        score = round(100 * _clamp(green_blue / 0.4))
+        score = round(50 * _clamp(green_blue / 0.4))
         components["green_blue_cover"] = round(green_blue, 4)
         components["veg_frac"] = round(veg_frac, 4)
         components["water_frac"] = round(water_frac, 4)
+
+    else:  # barren (quarries, exposed rock, barren land)
+        ndvi_now = now.get("ndvi", 0.0)
+        score = round(35 * _clamp((ndvi_now - 0.05) / 0.40))
+        components["barren_ndvi"] = round(ndvi_now, 4)
+        components["barren_frac"] = round(now.get("barren_frac", 0.0), 4)
 
     return t, max(0, min(100, score)), components
 
@@ -220,9 +242,11 @@ def compute_health_score_full(
     grade = _grade(score)
 
     if surface == "urban":
-        label = "Green and blue cover"
+        label = "Urban Watershed Health"
     elif surface == "water":
         label = "Water Body Health"
+    elif surface == "barren":
+        label = "Barren Land / Excavation"
     else:
         label = "Watershed Health"
 
@@ -281,7 +305,8 @@ def compute_health_score_snapshot(
         elif ndvi_val < 0.2 and ndwi_val < -0.1:
             now["built_frac"] = 0.6
 
-    surface, sat_score, sat_components = compute_satellite_score(now, base=None)
+    base = _extract_window(satellite_data, "t0") if ("ndvi_t0" in satellite_data or "water_frac_t0" in satellite_data) else None
+    surface, sat_score, sat_components = compute_satellite_score(now, base=base)
 
     if classification_result is not None:
         conf = classification_result.get("confidence", 0.5)
@@ -295,9 +320,11 @@ def compute_health_score_snapshot(
     grade = _grade(score)
 
     if surface == "urban":
-        label = "Green and blue cover"
+        label = "Urban Watershed Health"
     elif surface == "water":
         label = "Water Body Health"
+    elif surface == "barren":
+        label = "Barren Land / Excavation"
     else:
         label = "Watershed Health"
 
