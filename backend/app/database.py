@@ -23,8 +23,11 @@ def _get_async_url(url: str) -> str:
 
 
 # Engine & session factory — created once at import time
-# Falls back to a local SQLite if no DATABASE_URL is set (dev convenience)
-_db_url = settings.database_url or "sqlite+aiosqlite:///./dev.db"
+# Falls back to project root SQLite if no DATABASE_URL is set
+from pathlib import Path
+_ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_DB_PATH = (_ROOT_DIR / "dev.db").as_posix()
+_db_url = settings.database_url or f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}"
 _async_url = _get_async_url(_db_url) if "postgresql" in _db_url or "postgres" in _db_url else _db_url
 
 engine = create_async_engine(

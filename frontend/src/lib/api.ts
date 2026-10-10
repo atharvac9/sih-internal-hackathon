@@ -406,3 +406,39 @@ export async function auditPhotoAuto(
   };
 }
 
+export interface GeocodeResult {
+  name: string;
+  displayName: string;
+  lat: number;
+  lon: number;
+  type?: string;
+}
+
+export async function geocodeQuery(q: string, limit: number = 6): Promise<GeocodeResult[]> {
+  try {
+    const res = await fetch(`${API_BASE}/geocode?q=${encodeURIComponent(q)}&limit=${limit}`);
+    if (!res.ok) throw new Error("Geocode search failed");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend geocode search failed, falling back:", err);
+    return [];
+  }
+}
+
+export async function reverseGeocode(lat: number, lon: number): Promise<GeocodeResult> {
+  try {
+    const res = await fetch(`${API_BASE}/geocode/reverse?lat=${lat}&lon=${lon}`);
+    if (!res.ok) throw new Error("Reverse geocode failed");
+    return await res.json();
+  } catch (err) {
+    console.warn("Backend reverse geocode failed:", err);
+    return {
+      name: `Location (${lat.toFixed(4)}, ${lon.toFixed(4)})`,
+      displayName: `${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`,
+      lat,
+      lon,
+      type: "coordinate",
+    };
+  }
+}
+

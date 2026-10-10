@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Search, X, MapPin, Loader2, Navigation } from "lucide-react";
+import { geocodeQuery, reverseGeocode } from "../lib/api";
 
 export interface GeocodedLocation {
   name: string;
@@ -83,24 +84,8 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
     setIsSearching(true);
     const timeoutId = setTimeout(async () => {
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          trimmed
-        )}&limit=6&addressdetails=1`;
-        const res = await fetch(url, {
-          headers: {
-            "Accept-Language": "en",
-          },
-        });
-        if (!res.ok) throw new Error("Geocoding failed");
-        const data = await res.json();
-        const formatted: GeocodedLocation[] = data.map((item: any) => ({
-          name: item.display_name.split(",")[0],
-          displayName: item.display_name,
-          lat: parseFloat(item.lat),
-          lon: parseFloat(item.lon),
-          type: item.type || item.class,
-        }));
-        setResults(formatted);
+        const data = await geocodeQuery(trimmed, 6);
+        setResults(data);
         setIsDropdownOpen(true);
       } catch (err) {
         console.warn("Geocoding search error:", err);
@@ -126,25 +111,9 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
       } else if (query.trim().length >= 2) {
         setIsSearching(true);
         try {
-          const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-            query.trim()
-          )}&limit=1&addressdetails=1`;
-          const res = await fetch(url, {
-            headers: { "Accept-Language": "en" },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.length > 0) {
-              const item = data[0];
-              const loc: GeocodedLocation = {
-                name: item.display_name.split(",")[0],
-                displayName: item.display_name,
-                lat: parseFloat(item.lat),
-                lon: parseFloat(item.lon),
-                type: item.type || item.class,
-              };
-              handleSelect(loc);
-            }
+          const data = await geocodeQuery(query.trim(), 1);
+          if (data.length > 0) {
+            handleSelect(data[0]);
           }
         } catch (err) {
           console.warn("Direct geocode search error:", err);
@@ -168,21 +137,9 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
         setIsLocating(false);
         const lat = Number(pos.coords.latitude.toFixed(4));
         const lon = Number(pos.coords.longitude.toFixed(4));
-        // Reverse geocode to find place name
         try {
-          const revRes = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
-          );
-          const revData = await revRes.json();
-          const placeName = revData.display_name?.split(",")[0] || `Location (${lat}, ${lon})`;
-          const loc: GeocodedLocation = {
-            name: placeName,
-            displayName: revData.display_name || `${lat}°N, ${lon}°E`,
-            lat,
-            lon,
-            type: "current_position",
-          };
-          setQuery(placeName);
+          const loc = await reverseGeocode(lat, lon);
+          setQuery(loc.name);
           onLocationSelect(loc);
         } catch {
           const loc: GeocodedLocation = {

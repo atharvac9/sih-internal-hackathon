@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import create_tables
-from app.routers import sites, analysis, photos, reports, health
+from app.routers import sites, analysis, photos, reports, health, geocode
 
 # Configure logging
 logging.basicConfig(
@@ -71,6 +71,7 @@ app.include_router(sites.router, prefix=settings.api_prefix)
 app.include_router(analysis.router, prefix=settings.api_prefix)
 app.include_router(photos.router, prefix=settings.api_prefix)
 app.include_router(reports.router, prefix=settings.api_prefix)
+app.include_router(geocode.router, prefix=settings.api_prefix)
 
 
 @app.get("/")

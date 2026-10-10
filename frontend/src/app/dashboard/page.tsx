@@ -10,7 +10,7 @@ import { SiteDirectory } from "../../components/SiteDirectory";
 import { LocationScannerPanel } from "../../components/LocationScannerPanel";
 import { FieldUploadView } from "../../components/FieldUploadView";
 import { GeocodedLocation } from "../../components/LocationSearchInput";
-import { fetchSites } from "../../lib/api";
+import { fetchSites, reverseGeocode } from "../../lib/api";
 import { Site, Photo } from "../../lib/types";
 import { Compass, Loader2, Camera, ListFilter, X } from "lucide-react";
 
@@ -58,17 +58,8 @@ export default function DashboardPage() {
     setTargetCoords({ lat, lon });
     setSelectedSite(null);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
-      );
-      const data = await res.json();
-      const placeName = data.display_name?.split(",")[0] || `Point (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
-      setActiveSearchedPlace({
-        name: placeName,
-        displayName: data.display_name || `${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`,
-        lat,
-        lon,
-      });
+      const loc = await reverseGeocode(lat, lon);
+      setActiveSearchedPlace(loc);
     } catch {
       setActiveSearchedPlace({
         name: `Coordinates (${lat.toFixed(4)}°, ${lon.toFixed(4)}°)`,

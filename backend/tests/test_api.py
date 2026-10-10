@@ -312,3 +312,27 @@ def test_pdf_report_export_with_reportlab(client, monkeypatch):
     assert pdf_res.content.startswith(b"%PDF-")
     assert len(pdf_res.content) > 1000
 
+
+def test_geocode_endpoints(client):
+    """Test geocoding coordinate parsing, landmark search, and reverse lookup."""
+    # 1. Direct coordinate query
+    coord_res = client.get("/api/geocode?q=18.4400, 73.7700")
+    assert coord_res.status_code == 200
+    coord_data = coord_res.json()
+    assert len(coord_data) >= 1
+    assert coord_data[0]["type"] == "coordinate"
+    assert abs(coord_data[0]["lat"] - 18.44) < 1e-4
+
+    # 2. Curated landmark query
+    landmark_res = client.get("/api/geocode?q=Khadakwasla")
+    assert landmark_res.status_code == 200
+    landmark_data = landmark_res.json()
+    assert len(landmark_data) >= 1
+    assert any("Khadakwasla" in item["name"] for item in landmark_data)
+
+    # 3. Reverse lookup
+    rev_res = client.get("/api/geocode/reverse?lat=18.4400&lon=73.7700")
+    assert rev_res.status_code == 200
+    rev_data = rev_res.json()
+    assert "Khadakwasla" in rev_data["name"] or "Khadakwasla" in rev_data["displayName"]
+
