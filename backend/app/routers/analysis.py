@@ -434,8 +434,141 @@ async def get_latest_analysis(
     if analysis is None:
         raise HTTPException(status_code=404, detail="No analysis results found for this site")
 
-    mode = AnalysisMode(analysis.mode)
-    return _build_response_from_model(analysis, mode)
+    if is_analysis_stale(analysis, demo_mode=settings.demo_mode):
+        raise HTTPException(status_code=404, detail="Analysis result is stale and needs reanalysis")
+
+    try:
+        mode = AnalysisMode(analysis.mode)
+        return _build_response_from_model(analysis, mode)
+    except Exception as e:
+        logger.warning(f"Failed to build response from analysis row {analysis.id}: {e}")
+        raise HTTPException(status_code=404, detail="Stored analysis data is invalid and needs reanalysis")
+
+
+@router.post("/reanalyze-seeded")
+async def reanalyze_seeded_sites(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Recompute all seeded demo sites with the current GEE pipeline and replace stale rows.
+    Ensures new rows carry CURRENT_SCHEMA_VERSION.
+    """
+    from datetime import datetime as dt, timedelta
+    from tests.fixtures.reference_sites import REFERENCE_SITES
+
+    # Find existing seeded sites
+    result = await db.execute(select(Site).where(Site.is_seeded_demo == True))
+    seeded_sites = list(result.scalars().all())
+
+    # If no seeded sites are in the DB, create them from reference_sites fixture
+    if not seeded_sites:
+        for ref in REFERENCE_SITES:
+            s = Site(
+                id=ref["id"],
+                site_code=f"REF-{ref['id'][:8].upper()}",
+                lat=ref["lat"],
+                lon=ref["lon"],
+                buffer_radius_m=ref.get("buffer_radius_m", 250),
+                description=ref["description"],
+                activity_type=ref.get("expected_surface_type", "water_body"),
+                is_seeded_demo=True,
+            )
+            db.add(s)
+            seeded_sites.append(s)
+        await db.flush()
+
+    reanalyzed = []
+    errors = []
+
+    for site in seeded_sites:
+        has_baseline = site.baseline_date is not None
+        mode = AnalysisMode.FULL if has_baseline else AnalysisMode.SNAPSHOT
+
+        if has_baseline:
+            try:
+                base_dt = dt.strptime(site.baseline_date, "%Y-%m-%d")
+                t0_start = (base_dt - timedelta(days=45)).strftime("%Y-%m-%d")
+                t0_end = (base_dt + timedelta(days=45)).strftime("%Y-%m-%d")
+            except Exception:
+                t0_start, t0_end = "2023-01-01", "2023-04-01"
+
+            sat_data = await gee_service.get_full_indices(
+                site.lat, site.lon, t0_start, t0_end, site.buffer_radius_m or 250,
+            )
+        else:
+            sat_data = await gee_service.get_snapshot_indices(
+                site.lat, site.lon, site.buffer_radius_m or 250,
+            )
+
+        if "error" in sat_data:
+            if settings.demo_mode:
+                sat_data = _generate_simulated_telemetry(
+                    lat=site.lat,
+                    lon=site.lon,
+                    activity_type=site.activity_type,
+                    has_baseline=has_baseline,
+                    baseline_date=site.baseline_date,
+                    buffer_radius_m=site.buffer_radius_m or 250,
+                )
+            else:
+                errors.append({"site_id": site.id, "error": sat_data.get("message", sat_data.get("error"))})
+                continue
+
+        validation_result = None
+        if site.activity_type:
+            validation_result = cross_validator.validate_site(
+                activity_type=site.activity_type,
+                satellite_data=sat_data,
+                classification_result=None,
+            )
+
+        if mode == AnalysisMode.FULL and validation_result:
+            health_result = health_score.compute_health_score_full(sat_data, validation_result)
+        else:
+            health_result = health_score.compute_health_score_snapshot(sat_data)
+
+        new_analysis = AnalysisResult(
+            site_id=site.id,
+            schema_version=CURRENT_SCHEMA_VERSION,
+            mode=mode.value,
+            ndvi_t0=sat_data.get("ndvi_t0"),
+            ndwi_t0=sat_data.get("ndwi_t0"),
+            t0_start_date=sat_data.get("t0_start_date"),
+            t0_end_date=sat_data.get("t0_end_date"),
+            ndvi_tnow=sat_data.get("ndvi_tnow"),
+            ndwi_tnow=sat_data.get("ndwi_tnow"),
+            tnow_start_date=sat_data.get("tnow_start_date"),
+            tnow_end_date=sat_data.get("tnow_end_date"),
+            delta_ndvi=sat_data.get("delta_ndvi"),
+            delta_ndwi=sat_data.get("delta_ndwi"),
+            satellite_source=sat_data.get("source", "gee"),
+            satellite_agreement=validation_result.get("satellite_agreement") if validation_result else None,
+            photo_agreement=validation_result.get("photo_agreement") if validation_result else None,
+            overall_status=validation_result.get("overall_status") if validation_result else None,
+            flags_json=json.dumps(validation_result["flags"]) if validation_result else None,
+            validation_confidence=validation_result.get("confidence") if validation_result else None,
+            health_score=health_result["score"],
+            health_grade=health_result["grade"],
+            health_components_json=json.dumps(health_result["components"]),
+            buffer_radius_m=site.buffer_radius_m or 250,
+        )
+        db.add(new_analysis)
+        reanalyzed.append({
+            "site_id": site.id,
+            "site_code": site.site_code,
+            "health_score": health_result["score"],
+            "health_grade": health_result["grade"],
+            "source": sat_data.get("source", "gee"),
+            "surface_type": health_result.get("surface_type"),
+        })
+
+    await db.commit()
+    return {
+        "status": "success",
+        "reanalyzed_count": len(reanalyzed),
+        "reanalyzed": reanalyzed,
+        "errors": errors,
+    }
 
 
 # ── Response Builders ────────────────────────────────────────────────────────

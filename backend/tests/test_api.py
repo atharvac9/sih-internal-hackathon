@@ -107,9 +107,14 @@ def test_create_site_invalid_coords(client):
     assert resp.status_code == 422
 
 
-def test_adhoc_analysis_gee_failure_returns_503(client):
+def test_adhoc_analysis_gee_failure_returns_503(client, monkeypatch):
     """When GEE fails and DEMO_MODE is False, adhoc analysis returns 503 explicit error, not simulated data."""
     from app.config import settings
+
+    async def mock_get_snapshot(*args, **kwargs):
+        return {"error": "Earth Engine unavailable"}
+
+    monkeypatch.setattr("app.services.gee_service.get_snapshot_indices", mock_get_snapshot)
     prev_demo = settings.demo_mode
     settings.demo_mode = False
     try:
@@ -127,9 +132,14 @@ def test_adhoc_analysis_gee_failure_returns_503(client):
         settings.demo_mode = prev_demo
 
 
-def test_adhoc_analysis_demo_mode_returns_simulated_source(client):
-    """When DEMO_MODE is True, adhoc analysis returns 200 with source='simulated'."""
+def test_adhoc_analysis_demo_mode_returns_simulated_source(client, monkeypatch):
+    """When GEE fails and DEMO_MODE is True, adhoc analysis returns 200 with source='simulated'."""
     from app.config import settings
+
+    async def mock_get_snapshot(*args, **kwargs):
+        return {"error": "Earth Engine unavailable"}
+
+    monkeypatch.setattr("app.services.gee_service.get_snapshot_indices", mock_get_snapshot)
     prev_demo = settings.demo_mode
     settings.demo_mode = True
     try:
@@ -188,3 +198,78 @@ def test_photo_upload_and_geotag(client):
     patched_data = patch_res.json()
     assert patched_data["exif_lat"] == 20.0001
     assert patched_data["exif_lon"] == 73.8
+
+
+def test_stale_analysis_never_served(client):
+    """Rows with old schema_version or simulated data (while DEMO_MODE=False) count as stale and must never be served."""
+    import asyncio
+    import uuid
+    from app.models.analysis import AnalysisResult
+    from app.config import settings
+
+    settings.demo_mode = False
+
+    site_res = client.post("/api/sites", json={"lat": 18.5, "lon": 73.8, "description": "Stale Row Test Site"})
+    site_id = site_res.json()["id"]
+
+    # Insert a row with old schema_version=1 directly into test DB
+    async def insert_stale_row():
+        async with SessionLocal() as session:
+            stale_ana = AnalysisResult(
+                id=str(uuid.uuid4()),
+                site_id=site_id,
+                schema_version=1,  # Old version
+                mode="snapshot",
+                health_score=75,
+                health_grade="B",
+                satellite_source="gee",
+            )
+            session.add(stale_ana)
+            await session.commit()
+
+    asyncio.run(insert_stale_row())
+
+    # GET /latest must return 404 (needs reanalysis), not the stale row
+    resp = client.get(f"/api/analysis/{site_id}/latest")
+    assert resp.status_code == 404
+    assert "stale" in resp.json().get("detail", "").lower()
+
+    # GET /api/sites must return site with latest_analysis = None
+    site_get = client.get(f"/api/sites/{site_id}")
+    assert site_get.status_code == 200
+    assert site_get.json()["latest_analysis"] is None
+
+
+def test_latest_analysis_get_never_500s_on_old_row(client):
+    """GET /api/sites and GET /api/analysis/{id}/latest must never 500 on corrupted or old-schema rows."""
+    import asyncio
+    import uuid
+    from app.models.analysis import AnalysisResult
+
+    site_res = client.post("/api/sites", json={"lat": 18.6, "lon": 73.9, "description": "Tolerant Test Site"})
+    site_id = site_res.json()["id"]
+
+    async def insert_corrupt_row():
+        async with SessionLocal() as session:
+            corrupt_ana = AnalysisResult(
+                id=str(uuid.uuid4()),
+                site_id=site_id,
+                schema_version=2,
+                mode="unknown_mode",
+                health_score=60,
+                health_grade="C",
+                flags_json="INVALID_JSON{broken",
+                satellite_source="gee",
+            )
+            session.add(corrupt_ana)
+            await session.commit()
+
+    asyncio.run(insert_corrupt_row())
+
+    # Tolerant latest GET: must return 404, never 500
+    resp = client.get(f"/api/analysis/{site_id}/latest")
+    assert resp.status_code == 404
+
+    # Tolerant sites GET: must return 200, never 500
+    sites_resp = client.get("/api/sites")
+    assert sites_resp.status_code == 200

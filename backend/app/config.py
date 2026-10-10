@@ -129,7 +129,11 @@ class Settings(BaseSettings):
     cloud_score_threshold: float = 0.6  # cs_cdf >= this → clear pixel
     low_data_threshold: float = 0.30    # valid_fraction < this → low_data flag
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": [".env", "backend/.env"],
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     # ── Computed Properties ──────────────────────────────────────────────────
 
@@ -167,7 +171,7 @@ class Settings(BaseSettings):
     @property
     def gee_configured(self) -> bool:
         """True if GEE credentials are present."""
-        return bool(self.gee_service_account_key and self.gee_project_id)
+        return bool(self.gee_service_account_key)
 
 
 # Singleton — import this everywhere

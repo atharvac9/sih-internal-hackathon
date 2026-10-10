@@ -21,6 +21,7 @@ dist/
 cache/*
 temp/
 backend/data/
+data/
 
 # Node / Next.js
 node_modules/
@@ -30,11 +31,18 @@ out/
 *.tsbuildinfo
 npm-debug.log*
 
-# Environment & IDE
+# Environment & Secrets
 .env
-.env.local
+.env.*
+*.env
+*.pem
+*.key
+*key*.json
+gee-key.json
+
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
+

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Earth Engine is imported lazily to avoid import-time failures
 _ee = None
 _ee_initialized = False
+_ee_last_error = None
 
 
 def _get_ee():
@@ -46,15 +47,23 @@ def _get_ee():
     return _ee
 
 
+def get_gee_init_error() -> Optional[str]:
+    """Return the last error message from ee.Initialize failure, if any."""
+    return _ee_last_error
+
+
+def is_gee_initialized() -> bool:
+    """Return whether ee.Initialize has successfully run."""
+    return _ee_initialized
+
+
 def initialize_gee() -> bool:
     """
     Initialize GEE with service-account credentials from env vars.
-    Returns True if successful, False if credentials are not configured.
-
-    NEVER falls back to mock data. If GEE is not configured, the caller
-    must handle the "not configured" state explicitly.
+    Supports either a direct JSON string or a file path (e.g. C:\\keys\\gee-key.json).
+    Returns True if successful, False if credentials are not configured or failed.
     """
-    global _ee_initialized
+    global _ee_initialized, _ee_last_error
 
     if _ee_initialized:
         return True
@@ -62,29 +71,43 @@ def initialize_gee() -> bool:
     from app.config import settings
 
     if not settings.gee_configured:
-        logger.warning(
-            "GEE not configured: GEE_SERVICE_ACCOUNT_KEY and GEE_PROJECT_ID "
-            "env vars are required. See docs/GEE_SETUP.md"
-        )
+        _ee_last_error = "GEE not configured: GEE_SERVICE_ACCOUNT_KEY env var is required"
+        logger.warning(_ee_last_error)
         return False
 
     ee = _get_ee()
 
     try:
-        key_data = json.loads(settings.gee_service_account_key)
+        import os
+        key_raw = settings.gee_service_account_key.strip()
+        if os.path.isfile(key_raw):
+            with open(key_raw, "r", encoding="utf-8") as f:
+                key_raw = f.read().strip()
+
+        key_data = json.loads(key_raw)
+        email = settings.gee_service_account_email or key_data.get("client_email")
+        project_id = settings.gee_project_id or key_data.get("project_id")
+
+        if not email or not project_id:
+            _ee_last_error = "Missing client_email or project_id in GEE credentials"
+            logger.error(_ee_last_error)
+            return False
+
         credentials = ee.ServiceAccountCredentials(
-            settings.gee_service_account_email,
-            key_data=key_data,
+            email,
+            key_data=key_raw,
         )
         ee.Initialize(
             credentials=credentials,
-            project=settings.gee_project_id,
+            project=project_id,
         )
         _ee_initialized = True
-        logger.info("GEE initialized successfully with service account")
+        _ee_last_error = None
+        logger.info(f"GEE initialized successfully for project '{project_id}'")
         return True
 
     except Exception as e:
+        _ee_last_error = str(e)
         logger.error(f"GEE initialization failed: {e}")
         return False
 
