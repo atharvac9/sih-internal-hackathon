@@ -47,7 +47,7 @@ export const SiteInspector: React.FC<SiteInspectorProps> = ({
         {/* Header Bar */}
         <div className="flex items-start justify-between border-b border-slate-100 pb-4">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xl font-bold text-slate-900">{displayName}</span>
               <span
                 className={`text-xs font-bold uppercase px-2.5 py-0.5 rounded-full border ${
@@ -60,6 +60,11 @@ export const SiteInspector: React.FC<SiteInspectorProps> = ({
               >
                 {analysis?.overall_status || "Pending Analysis"}
               </span>
+              {analysis?.satellite_source?.toLowerCase().includes("simulated") && (
+                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                  Simulated Data
+                </span>
+              )}
             </div>
             <div className="text-sm font-semibold text-teal-700 mt-1 capitalize">
               {site.activity_type ? site.activity_type.replace(/_/g, " ") : "Unspecified Activity"}

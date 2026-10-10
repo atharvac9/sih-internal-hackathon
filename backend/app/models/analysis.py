@@ -23,6 +23,26 @@ class AnalysisMode(str, enum.Enum):
     SNAPSHOT = "snapshot"   # Current-only for arbitrary points
 
 
+CURRENT_SCHEMA_VERSION = 2
+
+
+def is_analysis_stale(analysis: "AnalysisResult | None", demo_mode: bool = False) -> bool:
+    """
+    Check if a stored analysis is stale.
+    Rows with an old version (< CURRENT_SCHEMA_VERSION), or with source='simulated'
+    while DEMO_MODE is false, count as stale and must never be served as current results.
+    """
+    if analysis is None:
+        return True
+    ver = getattr(analysis, "schema_version", None)
+    if ver is None or ver < CURRENT_SCHEMA_VERSION:
+        return True
+    src = (getattr(analysis, "satellite_source", "") or "").lower()
+    if not demo_mode and ("simulated" in src):
+        return True
+    return False
+
+
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
 
@@ -31,6 +51,11 @@ class AnalysisResult(Base):
     )
     site_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("sites.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Schema version for stored analyses
+    schema_version: Mapped[int] = mapped_column(
+        Integer, default=CURRENT_SCHEMA_VERSION, server_default=str(CURRENT_SCHEMA_VERSION), nullable=False
     )
 
     # Analysis mode

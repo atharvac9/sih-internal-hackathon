@@ -107,20 +107,44 @@ def test_create_site_invalid_coords(client):
     assert resp.status_code == 422
 
 
-def test_adhoc_analysis_graceful_handling(client):
-    """Even without GEE configured, adhoc analysis returns a structured response without crashing."""
-    payload = {
-        "lat": 19.05,
-        "lon": 74.72,
-        "claimed_activity_type": "farm_pond",
-        "buffer_radius_m": 500,
-    }
-    resp = client.post("/api/analysis/adhoc", json=payload)
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 200:
+def test_adhoc_analysis_gee_failure_returns_503(client):
+    """When GEE fails and DEMO_MODE is False, adhoc analysis returns 503 explicit error, not simulated data."""
+    from app.config import settings
+    prev_demo = settings.demo_mode
+    settings.demo_mode = False
+    try:
+        payload = {
+            "lat": 19.05,
+            "lon": 74.72,
+            "claimed_activity_type": "farm_pond",
+            "buffer_radius_m": 500,
+        }
+        resp = client.post("/api/analysis/adhoc", json=payload)
+        assert resp.status_code == 503
         data = resp.json()
-        assert "site_id" in data
-        assert "mode" in data
+        assert "Satellite analysis failed" in data.get("detail", "")
+    finally:
+        settings.demo_mode = prev_demo
+
+
+def test_adhoc_analysis_demo_mode_returns_simulated_source(client):
+    """When DEMO_MODE is True, adhoc analysis returns 200 with source='simulated'."""
+    from app.config import settings
+    prev_demo = settings.demo_mode
+    settings.demo_mode = True
+    try:
+        payload = {
+            "lat": 19.05,
+            "lon": 74.72,
+            "claimed_activity_type": "farm_pond",
+            "buffer_radius_m": 500,
+        }
+        resp = client.post("/api/analysis/adhoc", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["satellite"]["source"] == "simulated"
+    finally:
+        settings.demo_mode = prev_demo
 
 
 def test_photo_upload_and_geotag(client):

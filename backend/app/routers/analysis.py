@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.site import Site
-from app.models.analysis import AnalysisResult, AnalysisMode
+from app.models.analysis import AnalysisResult, AnalysisMode, CURRENT_SCHEMA_VERSION, is_analysis_stale
 from app.schemas.analysis import (
     AdHocAnalysisRequest,
     SiteAnalysisRequest,
@@ -26,6 +26,7 @@ from app.schemas.analysis import (
     HealthScoreResult,
 )
 from app.services import gee_service, cross_validator, health_score
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -153,7 +154,7 @@ def _generate_simulated_telemetry(
             "delta_ndwi": delta_w,
             "image_count_t0": int(6 + r3 * 8),
             "image_count_tnow": int(8 + r4 * 10),
-            "source": "simulated_telemetry",
+            "source": "simulated",
         }
     else:
         from app.services.gee_service import compute_windows
@@ -164,7 +165,7 @@ def _generate_simulated_telemetry(
             "tnow_start_date": windows["current_start"],
             "tnow_end_date": windows["current_end"],
             "image_count": int(8 + r3 * 10),
-            "source": "simulated_telemetry",
+            "source": "simulated",
         }
 
 
@@ -214,8 +215,14 @@ async def analyze_adhoc(
             body.lat, body.lon, body.buffer_radius_m,
         )
 
-    # Check for GEE errors — fallback to realistic coordinate-based telemetry
+    # Check for GEE errors — return 503 unless DEMO_MODE is true
     if "error" in sat_data:
+        if not settings.demo_mode:
+            reason = sat_data.get("message") or sat_data.get("error") or "Google Earth Engine analysis failed"
+            raise HTTPException(
+                status_code=503,
+                detail=f"Satellite analysis failed: {reason}",
+            )
         sat_data = _generate_simulated_telemetry(
             lat=body.lat,
             lon=body.lon,
@@ -250,6 +257,7 @@ async def analyze_adhoc(
     # 6. Persist analysis result
     analysis = AnalysisResult(
         site_id=site.id,
+        schema_version=CURRENT_SCHEMA_VERSION,
         mode=mode.value,
         ndvi_t0=sat_data.get("ndvi_t0"),
         ndwi_t0=sat_data.get("ndwi_t0"),
@@ -327,6 +335,12 @@ async def analyze_site(
         )
 
     if "error" in sat_data:
+        if not settings.demo_mode:
+            reason = sat_data.get("message") or sat_data.get("error") or "Google Earth Engine analysis failed"
+            raise HTTPException(
+                status_code=503,
+                detail=f"Satellite analysis failed: {reason}",
+            )
         sat_data = _generate_simulated_telemetry(
             lat=site.lat,
             lon=site.lon,

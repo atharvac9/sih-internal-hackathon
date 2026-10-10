@@ -7,7 +7,7 @@ of surface is at a point, then scores it appropriately:
 
   - WATER: scored on surface-area stability (not NDVI)
   - LAND: 70% absolute NDVI condition + 30% same-season trend
-  - URBAN: scored on green + blue cover fraction
+  - URBAN: scored on green + blue cover fraction ("Green and blue cover")
 
 When no photo/classification exists, agreement and confidence components
 are dropped entirely and remaining weights are renormalized — not defaulted
@@ -20,10 +20,12 @@ as heuristic thresholds, not scientific ones.
 import logging
 from typing import Optional
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 
-# ── Grade Configuration (returned in API response) ──────────────────────────
+# ── Grade Configuration (heuristic thresholds, returned in API) ─────────────
 
 GRADE_BANDS = {
     "A": {"min": 80, "label": "Excellent"},
@@ -49,37 +51,44 @@ def _grade(score: int) -> str:
 
 
 def get_grade_bands() -> dict:
-    """Return the grade bands config for API response transparency."""
+    """Return the heuristic grade bands config for API transparency."""
     return GRADE_BANDS
+
+
+def _clamp(x: float) -> float:
+    """Clamp to [0.0, 1.0]."""
+    return max(0.0, min(1.0, float(x)))
 
 
 # ── Surface Type Classification ──────────────────────────────────────────────
 
-def classify_surface_type(fractions: dict) -> str:
+def surface_type(f: dict) -> str:
     """
-    Classify the dominant surface type from per-pixel fractions.
-
-    Args:
-        fractions: dict with water_frac, veg_frac, built_frac
-
-    Returns:
-        "water", "urban", or "land"
+    Classify surface type from buffer surface fractions.
+      - water: water_frac >= 0.5
+      - urban: built_frac >= 0.4
+      - land: all other surfaces
     """
-    water_frac = fractions.get("water_frac", 0)
-    built_frac = fractions.get("built_frac", 0)
-
-    if water_frac >= 0.5:
+    if f.get("water_frac", 0.0) >= 0.5:
         return "water"
-    if built_frac >= 0.4:
+    if f.get("built_frac", 0.0) >= 0.4:
         return "urban"
     return "land"
 
 
+# Alias for backward compatibility
+classify_surface_type = surface_type
+
+
 # ── Satellite Score by Surface Type ──────────────────────────────────────────
 
-def _clamp(x: float) -> float:
-    """Clamp to [0.0, 1.0]."""
-    return max(0.0, min(1.0, x))
+def satellite_score(now: dict, base: Optional[dict] = None) -> tuple[str, int]:
+    """
+    Specification satellite score function:
+    Returns (surface_type, score_0_to_100).
+    """
+    st, score, _ = compute_satellite_score(now, base)
+    return st, score
 
 
 def compute_satellite_score(
@@ -87,61 +96,53 @@ def compute_satellite_score(
     base: Optional[dict] = None,
 ) -> tuple[str, int, dict]:
     """
-    Compute a surface-type-aware satellite score.
+    Compute a surface-type-aware satellite score with full component breakdown.
 
-    Args:
-        now: dict with ndvi, mndwi, ndbi, water_frac, veg_frac, built_frac
-        base: optional dict with same keys (for trend computation).
-              If None, only absolute condition is scored.
-
-    Returns:
-        (surface_type, score_0_to_100, components_dict)
-
-    The scoring rules:
-      - WATER: surface-area stability. A stable or expanding water body gets
-        high scores. Never depends on NDVI.
-      - LAND: 70% absolute NDVI condition (0.05→0.60 maps to 0→100) +
-        30% same-season NDVI trend (delta from -0.2 to +0.2 maps to 0→100).
-        If no baseline, 100% absolute.
-      - URBAN: green + blue cover share. (veg_frac + water_frac) / 0.4 → 0-100.
-        UI should label this "Green & Blue Cover", not "Watershed Health".
+    Rules:
+      - WATER: judged on surface-area stability, never NDVI.
+        change = (now["water_frac"] - base["water_frac"]) / max(base["water_frac"], 0.05)
+        round(100 * clamp((change + 0.5) / 0.5))  # -50% loss -> 0, no loss -> 100
+      - LAND:
+        absolute = clamp((now["ndvi"] - 0.05) / 0.55)
+        trend = clamp(((now["ndvi"] - base["ndvi"]) + 0.2) / 0.4)
+        round(100 * (0.7 * absolute + 0.3 * trend))
+      - URBAN:
+        round(100 * clamp((now["veg_frac"] + now["water_frac"]) / 0.4))
     """
-    fractions_now = {
-        "water_frac": now.get("water_frac", 0),
-        "veg_frac": now.get("veg_frac", 0),
-        "built_frac": now.get("built_frac", 0),
+    t = surface_type(now)
+    components = {
+        "surface_type": t,
     }
-    surface = classify_surface_type(fractions_now)
-    components = {}
 
-    if surface == "water":
+    if t == "water":
         if base is not None:
-            base_water = max(base.get("water_frac", 0), 0.05)
-            change = (now.get("water_frac", 0) - base.get("water_frac", 0)) / base_water
-            # -50% extent → 0, no loss → 100, growth capped at 100
-            stability_score = _clamp((change + 0.5) / 0.5)
-            score = round(100 * stability_score)
-            components["water_stability"] = round(100 * stability_score, 1)
-            components["water_frac_now"] = round(now.get("water_frac", 0), 4)
-            components["water_frac_base"] = round(base.get("water_frac", 0), 4)
+            base_water = max(base.get("water_frac", 0.0), 0.05)
+            now_water = now.get("water_frac", 0.0)
+            change = (now_water - base_water) / base_water
+            stability = _clamp((change + 0.5) / 0.5)
+            score = round(100 * stability)
+            components["water_stability"] = round(100 * stability, 1)
+            components["water_frac_now"] = round(now_water, 4)
+            components["water_frac_base"] = round(base_water, 4)
             components["water_change_pct"] = round(change * 100, 1)
         else:
-            # No baseline — score based on absolute water presence
-            # If water_frac >= 0.5, it IS a water body; score high for clear detection
-            wf = now.get("water_frac", 0)
-            score = round(100 * _clamp(wf / 0.7))
-            components["water_frac_now"] = round(wf, 4)
-            components["absolute_water_score"] = score
+            now_water = now.get("water_frac", 0.0)
+            score = round(100 * _clamp(now_water / 0.5))
+            components["water_frac_now"] = round(now_water, 4)
+            components["water_stability"] = score
 
-    elif surface == "land":
-        ndvi_now = now.get("ndvi", 0)
-        # Absolute condition: NDVI 0.05→0.60 maps to 0→100
+        if now.get("ndti") is not None:
+            components["turbidity_proxy_ndti"] = round(now["ndti"], 4)
+        if now.get("ndci") is not None:
+            components["chlorophyll_proxy_ndci"] = round(now["ndci"], 4)
+
+    elif t == "land":
+        ndvi_now = now.get("ndvi", 0.0)
         absolute = _clamp((ndvi_now - 0.05) / 0.55)
 
         if base is not None:
-            ndvi_base = base.get("ndvi", 0)
+            ndvi_base = base.get("ndvi", 0.0)
             delta = ndvi_now - ndvi_base
-            # Trend: delta from -0.2 to +0.2 maps to 0→100
             trend = _clamp((delta + 0.2) / 0.4)
             score = round(100 * (0.7 * absolute + 0.3 * trend))
             components["absolute_ndvi_condition"] = round(100 * absolute, 1)
@@ -155,15 +156,15 @@ def compute_satellite_score(
             components["ndvi_now"] = round(ndvi_now, 4)
 
     else:  # urban
-        veg_frac = now.get("veg_frac", 0)
-        water_frac = now.get("water_frac", 0)
+        veg_frac = now.get("veg_frac", 0.0)
+        water_frac = now.get("water_frac", 0.0)
         green_blue = veg_frac + water_frac
         score = round(100 * _clamp(green_blue / 0.4))
         components["green_blue_cover"] = round(green_blue, 4)
         components["veg_frac"] = round(veg_frac, 4)
         components["water_frac"] = round(water_frac, 4)
 
-    return surface, max(0, min(100, score)), components
+    return t, max(0, min(100, score)), components
 
 
 # ── Full Health Score (with optional photo/validation) ───────────────────────
@@ -176,29 +177,26 @@ def compute_health_score_full(
     FULL MODE health score — surface-type-aware, with optional cross-validation.
 
     Weights:
-      - If photo classification exists: 60% satellite + 20% agreement + 20% confidence
-      - If no photo: 100% satellite (renormalized — not defaulted to 50)
-
-    Args:
-        satellite_data: dict with all indices and fractions for both windows
-        validation_result: dict with overall_status, details.photo_confidence
-
-    Returns:
-        dict with score (0-100), grade (A-F), surface_type, mode, components,
-        grade_bands
+      - If photo evidence exists: 60% satellite + 20% agreement + 20% confidence
+      - If NO photo: 100% satellite (renormalized — NOT defaulted to 50!)
     """
-    # Build now/base dicts from satellite_data
     now = _extract_window(satellite_data, "tnow")
     base = _extract_window(satellite_data, "t0")
 
+    if "delta_ndvi" in satellite_data and "ndvi_tnow" not in satellite_data:
+        delta_v = satellite_data.get("delta_ndvi", 0.0)
+        delta_w = satellite_data.get("delta_ndwi", 0.0)
+        now["ndvi"] = 0.35 + delta_v / 2
+        base["ndvi"] = 0.35 - delta_v / 2
+        now["mndwi"] = delta_w / 2
+        base["mndwi"] = -delta_w / 2
+
     surface, sat_score, sat_components = compute_satellite_score(now, base)
 
-    # Check if photo evidence exists
-    photo_confidence = validation_result.get("details", {}).get("photo_confidence")
-    has_photo = photo_confidence is not None
+    photo_conf = validation_result.get("details", {}).get("photo_confidence")
+    has_photo = photo_conf is not None
 
     if has_photo:
-        # Agreement score
         status = validation_result.get("overall_status", "inconclusive")
         if status == "confirmed":
             agreement_score = 100.0
@@ -207,32 +205,37 @@ def compute_health_score_full(
         else:
             agreement_score = 0.0
 
-        confidence_score = photo_confidence * 100
-
+        confidence_score = float(photo_conf) * 100.0
         score = round(
             0.60 * sat_score
             + 0.20 * agreement_score
             + 0.20 * confidence_score
         )
     else:
-        # No photo → satellite score is 100% of the grade
         score = sat_score
+        agreement_score = None
+        confidence_score = None
 
     score = max(0, min(100, score))
     grade = _grade(score)
 
-    # Determine the UI label
     if surface == "urban":
-        label = "Green & Blue Cover"
+        label = "Green and blue cover"
     elif surface == "water":
         label = "Water Body Health"
     else:
         label = "Watershed Health"
 
+    delta_ndvi_val = satellite_data.get("delta_ndvi", now.get("ndvi", 0) - base.get("ndvi", 0))
+    delta_ndwi_val = satellite_data.get("delta_ndwi", now.get("mndwi", 0) - base.get("mndwi", 0))
+
     components = {
         "satellite_score": sat_score,
         **sat_components,
+        "ndvi_trend_score": round(_normalize_delta(delta_ndvi_val), 1),
+        "ndwi_trend_score": round(_normalize_delta(delta_ndwi_val), 1),
     }
+
     if has_photo:
         components["agreement_score"] = round(agreement_score, 1)
         components["confidence_score"] = round(confidence_score, 1)
@@ -245,11 +248,12 @@ def compute_health_score_full(
         "mode": "full",
         "components": components,
         "grade_bands": GRADE_BANDS,
-        # Low data warnings
         "low_data_t0": satellite_data.get("low_data_t0", False),
         "low_data_tnow": satellite_data.get("low_data_tnow", False),
     }
 
+
+# ── Snapshot Health Score ───────────────────────────────────────────────────
 
 def compute_health_score_snapshot(
     satellite_data: dict,
@@ -261,23 +265,27 @@ def compute_health_score_snapshot(
 
     Weights:
       - If photo classification exists: 70% satellite + 30% confidence
-      - If no photo: 100% satellite (renormalized)
-
-    Args:
-        satellite_data: dict with ndvi_tnow, mndwi_tnow, etc.
-        classification_result: optional dict with confidence
-
-    Returns:
-        dict with score (0-100), grade (A-F), surface_type, mode, components,
-        grade_bands
+      - If NO photo: 100% satellite (renormalized)
     """
     now = _extract_window(satellite_data, "tnow")
+
+    if "ndvi_tnow" in satellite_data and "veg_frac_tnow" not in satellite_data:
+        ndvi_val = satellite_data.get("ndvi_tnow", 0.0)
+        ndwi_val = satellite_data.get("ndwi_tnow", 0.0)
+        now["ndvi"] = ndvi_val
+        now["mndwi"] = ndwi_val
+        if ndwi_val > 0.2 and ndvi_val <= 0.0:
+            now["water_frac"] = 0.8
+        elif ndvi_val > 0.3:
+            now["veg_frac"] = 0.6
+        elif ndvi_val < 0.2 and ndwi_val < -0.1:
+            now["built_frac"] = 0.6
 
     surface, sat_score, sat_components = compute_satellite_score(now, base=None)
 
     if classification_result is not None:
-        confidence = classification_result.get("confidence", 0.5)
-        confidence_score = confidence * 100
+        conf = classification_result.get("confidence", 0.5)
+        confidence_score = float(conf) * 100.0
         score = round(0.70 * sat_score + 0.30 * confidence_score)
     else:
         score = sat_score
@@ -287,16 +295,22 @@ def compute_health_score_snapshot(
     grade = _grade(score)
 
     if surface == "urban":
-        label = "Green & Blue Cover"
+        label = "Green and blue cover"
     elif surface == "water":
         label = "Water Body Health"
     else:
         label = "Watershed Health"
 
+    ndvi_val = now.get("ndvi", 0.0)
+    mndwi_val = now.get("mndwi", 0.0)
+
     components = {
         "satellite_score": sat_score,
         **sat_components,
+        "ndvi_absolute_score": round(_absolute_ndvi_score(ndvi_val), 1),
+        "ndwi_absolute_score": round(_absolute_ndwi_score(mndwi_val), 1),
     }
+
     if confidence_score is not None:
         components["confidence_score"] = round(confidence_score, 1)
 
@@ -315,23 +329,19 @@ def compute_health_score_snapshot(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _extract_window(sat_data: dict, suffix: str) -> dict:
-    """
-    Extract a window's worth of data from satellite_data dict.
-
-    For suffix="tnow", looks for ndvi_tnow, mndwi_tnow, water_frac_tnow, etc.
-    For suffix="t0", looks for ndvi_t0, mndwi_t0, water_frac_t0, etc.
-
-    Falls back to legacy keys (ndwi_tnow → mndwi if mndwi missing).
-    """
+    """Extract a window's data from satellite_data dict."""
     def _get(key):
-        # Try the suffixed key first
         val = sat_data.get(f"{key}_{suffix}")
         if val is not None:
-            return val
-        # Legacy fallback
+            return float(val)
         if key == "mndwi":
-            return sat_data.get(f"ndwi_{suffix}", 0)
-        return 0
+            legacy = sat_data.get(f"ndwi_{suffix}")
+            if legacy is not None:
+                return float(legacy)
+        val = sat_data.get(key)
+        if val is not None:
+            return float(val)
+        return 0.0
 
     return {
         "ndvi": _get("ndvi"),
@@ -340,15 +350,51 @@ def _extract_window(sat_data: dict, suffix: str) -> dict:
         "water_frac": _get("water_frac"),
         "veg_frac": _get("veg_frac"),
         "built_frac": _get("built_frac"),
+        "ndti": sat_data.get(f"ndti_{suffix}"),
+        "ndci": sat_data.get(f"ndci_{suffix}"),
     }
 
 
-def compute_watershed_summary(health_scores: list[dict]) -> dict:
-    """
-    Aggregate health scores across multiple sites.
+def _normalize_delta(delta: float, min_val: float = None, max_val: float = None) -> float:
+    """Normalize a delta value from [min_val, max_val] to [0, 100]."""
+    if min_val is None:
+        min_val = settings.index_delta_min
+    if max_val is None:
+        max_val = settings.index_delta_max
+    if max_val == min_val:
+        return 50.0
+    normalized = (delta - min_val) / (max_val - min_val) * 100
+    return max(0.0, min(100.0, normalized))
 
-    Returns overall score, count, grade distribution.
-    """
+
+def _absolute_ndvi_score(ndvi: float) -> float:
+    """Legacy absolute NDVI scorer for backwards compatibility."""
+    if ndvi >= 0.5:
+        return 100.0
+    elif ndvi >= 0.3:
+        return 60.0 + (ndvi - 0.3) / 0.2 * 40.0
+    elif ndvi >= 0.15:
+        return 30.0 + (ndvi - 0.15) / 0.15 * 30.0
+    elif ndvi >= 0.0:
+        return ndvi / 0.15 * 30.0
+    else:
+        return 0.0
+
+
+def _absolute_ndwi_score(ndwi: float) -> float:
+    """Legacy absolute NDWI scorer for backwards compatibility."""
+    if ndwi >= 0.3:
+        return 100.0
+    elif ndwi >= 0.0:
+        return 50.0 + ndwi / 0.3 * 50.0
+    elif ndwi >= -0.2:
+        return 20.0 + (ndwi + 0.2) / 0.2 * 30.0
+    else:
+        return max(0.0, 20.0 + (ndwi + 0.2) / 0.3 * 20.0)
+
+
+def compute_watershed_summary(health_scores: list[dict]) -> dict:
+    """Aggregate health scores across multiple sites."""
     if not health_scores:
         return {"overall_score": 0, "site_count": 0, "grade_distribution": {}}
 

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_name: str = "Clean Water Initiative"
     debug: bool = False
     api_prefix: str = "/api"
+    demo_mode: bool = False  # If false, failed GEE calls return 503; if true, simulated data is allowed
 
     # Allowed frontend origins for CORS — comma-separated in env var
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"

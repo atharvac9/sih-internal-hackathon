@@ -57,3 +57,13 @@ async def create_tables():
     """Create all tables (dev/init only — use Alembic for production migrations)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        def migrate_schema(sync_conn):
+            from sqlalchemy import inspect, text
+            inspector = inspect(sync_conn)
+            if "analysis_results" in inspector.get_table_names():
+                cols = [c["name"] for c in inspector.get_columns("analysis_results")]
+                if "schema_version" not in cols:
+                    sync_conn.execute(text("ALTER TABLE analysis_results ADD COLUMN schema_version INTEGER DEFAULT 1"))
+
+        await conn.run_sync(migrate_schema)

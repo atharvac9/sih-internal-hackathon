@@ -22,30 +22,39 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 def _serialize_analysis(latest: Optional[AnalysisResult]) -> Optional[dict]:
     if not latest:
         return None
-    flags = json.loads(latest.flags_json) if latest.flags_json else []
-    return {
-        "id": latest.id,
-        "site_id": latest.site_id,
-        "mode": latest.mode,
-        "health_score": latest.health_score,
-        "health_grade": latest.health_grade,
-        "delta_ndvi": latest.delta_ndvi,
-        "delta_ndwi": latest.delta_ndwi,
-        "ndvi_t0": latest.ndvi_t0,
-        "ndvi_tnow": latest.ndvi_tnow,
-        "ndwi_t0": latest.ndwi_t0,
-        "ndwi_tnow": latest.ndwi_tnow,
-        "satellite_agreement": latest.satellite_agreement,
-        "photo_agreement": latest.photo_agreement,
-        "overall_status": latest.overall_status,
-        "flags": flags,
-        "confidence_score": latest.validation_confidence,
-        "classified_activity": latest.predicted_class,
-        "classification_confidence": latest.photo_confidence,
-        "satellite_source": latest.satellite_source,
-        "buffer_radius_m": latest.buffer_radius_m,
-        "analyzed_at": latest.created_at.isoformat() if latest.created_at else None,
-    }
+    from app.models.analysis import is_analysis_stale
+    from app.config import settings
+    if is_analysis_stale(latest, demo_mode=settings.demo_mode):
+        return None
+    try:
+        flags = json.loads(latest.flags_json) if latest.flags_json else []
+        return {
+            "id": latest.id,
+            "site_id": latest.site_id,
+            "mode": latest.mode,
+            "health_score": latest.health_score,
+            "health_grade": latest.health_grade,
+            "delta_ndvi": latest.delta_ndvi,
+            "delta_ndwi": latest.delta_ndwi,
+            "ndvi_t0": latest.ndvi_t0,
+            "ndvi_tnow": latest.ndvi_tnow,
+            "ndwi_t0": latest.ndwi_t0,
+            "ndwi_tnow": latest.ndwi_tnow,
+            "satellite_agreement": latest.satellite_agreement,
+            "photo_agreement": latest.photo_agreement,
+            "overall_status": latest.overall_status,
+            "flags": flags,
+            "confidence_score": latest.validation_confidence,
+            "classified_activity": latest.predicted_class,
+            "classification_confidence": latest.photo_confidence,
+            "satellite_source": latest.satellite_source,
+            "buffer_radius_m": latest.buffer_radius_m,
+            "analyzed_at": latest.created_at.isoformat() if latest.created_at else None,
+            "schema_version": getattr(latest, "schema_version", 1),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to serialize analysis row {latest.id}: {e}")
+        return None
 
 
 @router.get("", response_model=SiteListResponse)

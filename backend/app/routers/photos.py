@@ -20,6 +20,7 @@ from app.schemas.photo import PhotoResponse, PhotoListResponse
 from app.models.analysis import AnalysisResult, AnalysisMode
 from app.services import classifier, exif_checker, storage, gee_service, cross_validator, health_score
 from app.routers.analysis import _generate_simulated_telemetry
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/photos", tags=["photos"])
@@ -166,6 +167,12 @@ async def auto_audit_photo(
     # 6. Synchronize Sentinel-2 satellite telemetry for these exact coordinates
     sat_data = await gee_service.get_snapshot_indices(target_lat, target_lon, buffer_radius_m)
     if "error" in sat_data:
+        if not settings.demo_mode:
+            reason = sat_data.get("message") or sat_data.get("error") or "Google Earth Engine analysis failed"
+            raise HTTPException(
+                status_code=503,
+                detail=f"Satellite analysis failed: {reason}",
+            )
         sat_data = _generate_simulated_telemetry(
             lat=target_lat,
             lon=target_lon,

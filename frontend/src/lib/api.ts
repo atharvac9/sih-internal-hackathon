@@ -82,61 +82,58 @@ export async function runAdHocAnalysis(payload: AdHocAnalysisPayload): Promise<A
         ? sat.delta_ndvi
         : typeof raw.delta_ndvi === "number"
         ? raw.delta_ndvi
-        : 0.134;
+        : null;
 
     const deltaNdwi =
       typeof sat.delta_ndwi === "number"
         ? sat.delta_ndwi
         : typeof raw.delta_ndwi === "number"
         ? raw.delta_ndwi
-        : 0.086;
+        : null;
 
     const ndviT0 =
       typeof sat.ndvi_t0 === "number"
         ? sat.ndvi_t0
         : typeof raw.ndvi_t0 === "number"
         ? raw.ndvi_t0
-        : 0.22;
+        : null;
+
     const ndviTnow =
       typeof sat.ndvi_tnow === "number"
         ? sat.ndvi_tnow
         : typeof raw.ndvi_tnow === "number"
         ? raw.ndvi_tnow
-        : Number((ndviT0 + deltaNdvi).toFixed(4));
+        : null;
+
     const ndwiT0 =
       typeof sat.ndwi_t0 === "number"
         ? sat.ndwi_t0
         : typeof raw.ndwi_t0 === "number"
         ? raw.ndwi_t0
-        : -0.16;
+        : null;
+
     const ndwiTnow =
       typeof sat.ndwi_tnow === "number"
         ? sat.ndwi_tnow
         : typeof raw.ndwi_tnow === "number"
         ? raw.ndwi_tnow
-        : Number((ndwiT0 + deltaNdwi).toFixed(4));
+        : null;
 
     const score =
       typeof hs.score === "number"
         ? hs.score
         : typeof raw.health_score === "number"
         ? raw.health_score
-        : 84;
+        : null;
 
     const grade =
       typeof hs.grade === "string"
         ? hs.grade
         : typeof raw.health_grade === "string"
         ? raw.health_grade
-        : score >= 80
-        ? "A"
-        : score >= 65
-        ? "B"
-        : score >= 50
-        ? "C"
-        : "D";
+        : null;
 
-    const status = cv.overall_status || raw.overall_status || "confirmed";
+    const status = cv.overall_status || raw.overall_status || "inconclusive";
 
     return {
       id: raw.id || "adhoc-" + Date.now(),
@@ -144,48 +141,51 @@ export async function runAdHocAnalysis(payload: AdHocAnalysisPayload): Promise<A
       mode: raw.mode || (payload.baseline_date ? "full" : "snapshot"),
       health_score: score,
       health_grade: grade,
-      delta_ndvi: Number(deltaNdvi.toFixed(4)),
-      delta_ndwi: Number(deltaNdwi.toFixed(4)),
-      ndvi_t0: Number(ndviT0.toFixed(4)),
-      ndvi_tnow: Number(ndviTnow.toFixed(4)),
-      ndwi_t0: Number(ndwiT0.toFixed(4)),
-      ndwi_tnow: Number(ndwiTnow.toFixed(4)),
-      satellite_agreement: cv.satellite_agreement ?? true,
+      delta_ndvi: deltaNdvi !== null ? Number(deltaNdvi.toFixed(4)) : null,
+      delta_ndwi: deltaNdwi !== null ? Number(deltaNdwi.toFixed(4)) : null,
+      ndvi_t0: ndviT0 !== null ? Number(ndviT0.toFixed(4)) : null,
+      ndvi_tnow: ndviTnow !== null ? Number(ndviTnow.toFixed(4)) : null,
+      ndwi_t0: ndwiT0 !== null ? Number(ndwiT0.toFixed(4)) : null,
+      ndwi_tnow: ndwiTnow !== null ? Number(ndwiTnow.toFixed(4)) : null,
+      satellite_agreement: cv.satellite_agreement ?? null,
       photo_agreement: cv.photo_agreement ?? null,
       overall_status: status,
       flags: cv.flags || raw.flags || [],
-      confidence_score: cv.confidence ?? 0.88,
+      confidence_score: cv.confidence ?? null,
       classified_activity: payload.claimed_activity_type || null,
-      classification_confidence: 0.88,
-      satellite_source: sat.source || raw.satellite_source || "Multi-Spectral Telemetry",
+      classification_confidence: null,
+      satellite_source: sat.source || raw.satellite_source || "gee",
       buffer_radius_m: raw.buffer_radius_m || payload.buffer_radius_m || 500,
       analyzed_at: raw.created_at || new Date().toISOString(),
     };
   } catch (err) {
-    // Client-side simulation fallback when backend or GEE is offline
-    console.warn("Generating simulated preview for ad-hoc point:", err);
-    const mockScore = Math.floor(65 + Math.random() * 25);
-    const grade = mockScore >= 80 ? "A" : mockScore >= 65 ? "B" : mockScore >= 50 ? "C" : "D";
+    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    if (!isDemo) {
+      // Re-throw so caller displays explicit error state
+      throw err;
+    }
+    // Gated fallback: only when NEXT_PUBLIC_DEMO_MODE is true, carrying source="simulated"
+    console.warn("NEXT_PUBLIC_DEMO_MODE active: using simulated preview:", err);
     return {
       id: "adhoc-" + Date.now(),
       site_id: "adhoc-site",
       mode: payload.baseline_date ? "full" : "snapshot",
-      health_score: mockScore,
-      health_grade: grade,
-      delta_ndvi: 0.12 + (Math.random() * 0.1 - 0.05),
-      delta_ndwi: 0.08 + (Math.random() * 0.1 - 0.05),
-      ndvi_t0: 0.22,
-      ndvi_tnow: 0.35,
-      ndwi_t0: -0.15,
-      ndwi_tnow: -0.05,
+      health_score: 72,
+      health_grade: "B",
+      delta_ndvi: payload.baseline_date ? 0.10 : null,
+      delta_ndwi: payload.baseline_date ? 0.05 : null,
+      ndvi_t0: payload.baseline_date ? 0.22 : null,
+      ndvi_tnow: 0.32,
+      ndwi_t0: payload.baseline_date ? -0.15 : null,
+      ndwi_tnow: -0.10,
       satellite_agreement: true,
       photo_agreement: null,
       overall_status: "confirmed",
       flags: [],
       confidence_score: 0.85,
       classified_activity: payload.claimed_activity_type || null,
-      classification_confidence: 0.88,
-      satellite_source: "Multi-Spectral Telemetry (Simulated / GEE Offline)",
+      classification_confidence: 0.85,
+      satellite_source: "simulated",
       buffer_radius_m: payload.buffer_radius_m || 500,
       analyzed_at: new Date().toISOString(),
     };

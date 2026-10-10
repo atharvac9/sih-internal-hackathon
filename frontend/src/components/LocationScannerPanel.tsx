@@ -660,6 +660,14 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
             {/* ── MANUAL SCAN RESULT ACCORDION ───────────────────────────────── */}
             {analysisResult && (
               <div className="flex flex-col gap-4 pt-2 border-t border-slate-100 animate-in fade-in duration-300">
+                {/* Simulated Data Badge */}
+                {analysisResult.satellite_source?.toLowerCase().includes("simulated") && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>Simulated Telemetry (Demo Mode active — not real Earth Engine data)</span>
+                  </div>
+                )}
+
                 {/* Health & Status Card */}
                 <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200 flex items-center justify-between">
                   <div className="flex flex-col">
@@ -668,45 +676,51 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
                     </span>
                     <div className="flex items-baseline gap-2 mt-1">
                       <span className="text-2xl font-black font-mono text-slate-900">
-                        {analysisResult.health_score ?? 73}
+                        {analysisResult.health_score !== null && analysisResult.health_score !== undefined
+                          ? analysisResult.health_score
+                          : "—"}
                       </span>
-                      <span className="text-xs font-bold font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                        Grade {analysisResult.health_grade || "B"}
-                      </span>
+                      {analysisResult.health_grade && (
+                        <span className="text-xs font-bold font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                          Grade {analysisResult.health_grade}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                      <path
-                        className="text-slate-200"
-                        strokeWidth="3.5"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                      <path
-                        className={
-                          (analysisResult.health_score ?? 73) >= 80
-                            ? "text-emerald-500"
-                            : (analysisResult.health_score ?? 73) >= 65
-                            ? "text-teal-500"
-                            : (analysisResult.health_score ?? 73) >= 50
-                            ? "text-amber-500"
-                            : "text-rose-500"
-                        }
-                        strokeDasharray={`${analysisResult.health_score ?? 73}, 100`}
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                    </svg>
-                    <span className="absolute text-[11px] font-black font-mono text-slate-800">
-                      {analysisResult.health_score ?? 73}
-                    </span>
-                  </div>
+                  {analysisResult.health_score !== null && analysisResult.health_score !== undefined && (
+                    <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                        <path
+                          className="text-slate-200"
+                          strokeWidth="3.5"
+                          stroke="currentColor"
+                          fill="none"
+                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        />
+                        <path
+                          className={
+                            analysisResult.health_score >= 80
+                              ? "text-emerald-500"
+                              : analysisResult.health_score >= 65
+                              ? "text-teal-500"
+                              : analysisResult.health_score >= 50
+                              ? "text-amber-500"
+                              : "text-rose-500"
+                          }
+                          strokeDasharray={`${analysisResult.health_score}, 100`}
+                          strokeWidth="3.5"
+                          strokeLinecap="round"
+                          stroke="currentColor"
+                          fill="none"
+                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        />
+                      </svg>
+                      <span className="absolute text-[11px] font-black font-mono text-slate-800">
+                        {analysisResult.health_score}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Spectral Metrics Grid */}
@@ -717,10 +731,12 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
                     </span>
                     <span className="text-base font-bold text-emerald-700 mt-0.5">
                       {hasBaseline
-                        ? (analysisResult.delta_ndvi ?? 0) >= 0
-                          ? `+${(analysisResult.delta_ndvi ?? 0).toFixed(3)}`
-                          : (analysisResult.delta_ndvi ?? 0).toFixed(3)
-                        : (analysisResult.ndvi_tnow ?? 0.28).toFixed(3)}
+                        ? analysisResult.delta_ndvi !== null && analysisResult.delta_ndvi !== undefined
+                          ? (analysisResult.delta_ndvi >= 0 ? `+${analysisResult.delta_ndvi.toFixed(3)}` : analysisResult.delta_ndvi.toFixed(3))
+                          : "—"
+                        : analysisResult.ndvi_tnow !== null && analysisResult.ndvi_tnow !== undefined
+                        ? analysisResult.ndvi_tnow.toFixed(3)
+                        : "—"}
                     </span>
                   </div>
 
@@ -730,10 +746,12 @@ export const LocationScannerPanel: React.FC<LocationScannerPanelProps> = ({
                     </span>
                     <span className="text-base font-bold text-sky-700 mt-0.5">
                       {hasBaseline
-                        ? (analysisResult.delta_ndwi ?? 0) >= 0
-                          ? `+${(analysisResult.delta_ndwi ?? 0).toFixed(3)}`
-                          : (analysisResult.delta_ndwi ?? 0).toFixed(3)
-                        : (analysisResult.ndwi_tnow ?? 0.12).toFixed(3)}
+                        ? analysisResult.delta_ndwi !== null && analysisResult.delta_ndwi !== undefined
+                          ? (analysisResult.delta_ndwi >= 0 ? `+${analysisResult.delta_ndwi.toFixed(3)}` : analysisResult.delta_ndwi.toFixed(3))
+                          : "—"
+                        : analysisResult.ndwi_tnow !== null && analysisResult.ndwi_tnow !== undefined
+                        ? analysisResult.ndwi_tnow.toFixed(3)
+                        : "—"}
                     </span>
                   </div>
                 </div>

@@ -4,7 +4,7 @@ Pydantic schemas for Analysis — including ad-hoc arbitrary-point requests.
 
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 
 
 # ── Request Schemas ──────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ class HealthScoreResult(BaseModel):
     mode: str   # "full" or "snapshot"
     surface_type: Optional[str] = None  # "water", "land", "urban"
     label: Optional[str] = None  # UI-facing label (e.g. "Green & Blue Cover")
-    components: dict[str, float]
+    components: dict[str, Any]
     grade_bands: Optional[dict] = None  # Heuristic threshold reference
     low_data_t0: Optional[bool] = None
     low_data_tnow: Optional[bool] = None

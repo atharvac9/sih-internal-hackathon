@@ -240,7 +240,13 @@ export const AdHocScannerModal: React.FC<AdHocScannerModalProps> = ({
           <div className="bg-slate-50 rounded-xl p-4 border border-teal-200 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <span className="text-xs font-bold text-teal-800 uppercase tracking-wider">Analysis Result</span>
-              <span className="text-xs font-mono text-slate-500">Spectral Telemetry Engine</span>
+              {result.satellite_source?.toLowerCase().includes("simulated") ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 uppercase">
+                  Simulated Data (Demo Mode)
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-slate-500">Spectral Telemetry Engine</span>
+              )}
             </div>
 
             <HealthGauge

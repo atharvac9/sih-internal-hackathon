@@ -127,6 +127,11 @@ export const SiteDirectory: React.FC<SiteDirectoryProps> = ({ sites, onSelectSit
                           Demo
                         </span>
                       )}
+                      {analysis?.satellite_source?.toLowerCase().includes("simulated") && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 uppercase font-sans">
+                          Simulated
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3 capitalize text-slate-800">
                       {site.activity_type ? site.activity_type.replace(/_/g, " ") : "General Basin"}
