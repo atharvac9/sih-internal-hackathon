@@ -440,14 +440,36 @@ def _build_response(
     satellite = SatelliteData(
         ndvi_tnow=sat_data.get("ndvi_tnow"),
         ndwi_tnow=sat_data.get("ndwi_tnow"),
+        mndwi_tnow=sat_data.get("mndwi_tnow"),
+        ndbi_tnow=sat_data.get("ndbi_tnow"),
+        ndti_tnow=sat_data.get("ndti_tnow"),
+        ndci_tnow=sat_data.get("ndci_tnow"),
+        water_frac_tnow=sat_data.get("water_frac_tnow"),
+        veg_frac_tnow=sat_data.get("veg_frac_tnow"),
+        built_frac_tnow=sat_data.get("built_frac_tnow"),
+        valid_pixels_tnow=sat_data.get("valid_pixels_tnow"),
+        valid_fraction_tnow=sat_data.get("valid_fraction_tnow"),
+        low_data_tnow=sat_data.get("low_data_tnow"),
         tnow_start_date=sat_data.get("tnow_start_date"),
         tnow_end_date=sat_data.get("tnow_end_date"),
+        scene_count_tnow=sat_data.get("scene_count_tnow"),
         ndvi_t0=sat_data.get("ndvi_t0"),
         ndwi_t0=sat_data.get("ndwi_t0"),
+        mndwi_t0=sat_data.get("mndwi_t0"),
+        ndbi_t0=sat_data.get("ndbi_t0"),
+        water_frac_t0=sat_data.get("water_frac_t0"),
+        veg_frac_t0=sat_data.get("veg_frac_t0"),
+        built_frac_t0=sat_data.get("built_frac_t0"),
+        valid_pixels_t0=sat_data.get("valid_pixels_t0"),
+        valid_fraction_t0=sat_data.get("valid_fraction_t0"),
+        low_data_t0=sat_data.get("low_data_t0"),
         t0_start_date=sat_data.get("t0_start_date"),
         t0_end_date=sat_data.get("t0_end_date"),
+        scene_count_t0=sat_data.get("scene_count_t0"),
         delta_ndvi=sat_data.get("delta_ndvi"),
         delta_ndwi=sat_data.get("delta_ndwi"),
+        delta_mndwi=sat_data.get("delta_mndwi"),
+        delta_ndbi=sat_data.get("delta_ndbi"),
         source=sat_data.get("source", sat_data.get("error", "unknown")),
     )
 
@@ -467,7 +489,12 @@ def _build_response(
             score=health_result["score"],
             grade=health_result["grade"],
             mode=health_result["mode"],
+            surface_type=health_result.get("surface_type"),
+            label=health_result.get("label"),
             components=health_result["components"],
+            grade_bands=health_result.get("grade_bands"),
+            low_data_t0=health_result.get("low_data_t0"),
+            low_data_tnow=health_result.get("low_data_tnow"),
         )
 
     classification = None
@@ -531,6 +558,7 @@ def _build_response_from_model(
             mode=analysis.mode,
             components=json.loads(analysis.health_components_json)
             if analysis.health_components_json else {},
+            grade_bands=health_score.GRADE_BANDS,
         )
 
     classification = None
