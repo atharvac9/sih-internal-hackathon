@@ -41,7 +41,8 @@ def _generate_simulated_telemetry(
 ) -> dict:
     """
     Generate realistic coordinate-based deterministic telemetry when GEE is offline or unconfigured.
-    Provides diverse, location-specific, and ecologically sound NDVI/NDWI metrics and health variations.
+    Now includes surface fractions, MNDWI, NDBI for the new surface-type-aware scoring.
+    Returns explicit source='simulated_telemetry' — never pretends to be real GEE data.
     """
     import hashlib
     from datetime import datetime as dt, timedelta
@@ -56,23 +57,19 @@ def _generate_simulated_telemetry(
     r4 = ((h // 1000000000) % 1000) / 1000.0
 
     ndvi_t0 = round(0.18 + 0.16 * r2, 4)
-    ndwi_t0 = round(-0.20 + 0.10 * r3, 4)
+    mndwi_t0 = round(-0.20 + 0.10 * r3, 4)
 
     # Ecological performance spectrum based on location & intervention
     if r1 < 0.06:
-        # Severe structural deficit / anomaly (Grade D/F: 35-48)
         delta_v = round(-0.06 + r2 * 0.03, 4)
         delta_w = round(-0.07 + r3 * 0.04, 4)
     elif r1 < 0.46:
-        # High impact restoration (Grade A: 80-95)
         delta_v = round(0.18 + r2 * 0.10, 4)
         delta_w = round(0.12 + r3 * 0.09, 4)
     elif r1 < 0.86:
-        # Standard healthy intervention (Grade B: 66-79)
         delta_v = round(0.10 + r2 * 0.08, 4)
         delta_w = round(0.06 + r3 * 0.06, 4)
     else:
-        # Moderate / Marginal vegetation recovery (Grade C: 50-64)
         delta_v = round(0.03 + r2 * 0.04, 4)
         delta_w = round(0.01 + r3 * 0.04, 4)
 
@@ -91,41 +88,83 @@ def _generate_simulated_telemetry(
     delta_w = round(delta_w * dilution, 4)
 
     ndvi_tnow = round(max(-1.0, min(1.0, ndvi_t0 + delta_v)), 4)
-    ndwi_tnow = round(max(-1.0, min(1.0, ndwi_t0 + delta_w)), 4)
+    mndwi_tnow = round(max(-1.0, min(1.0, mndwi_t0 + delta_w)), 4)
+
+    # Surface fractions — deterministic from hash
+    # For most simulated sites (land): moderate veg, low water, low built
+    water_frac = round(r3 * 0.15, 4)
+    veg_frac = round(0.3 + r2 * 0.3, 4)
+    built_frac = round(r4 * 0.15, 4)
+
+    # Adjust fractions based on activity type
+    if act in ("water_body", "farm_pond", "check_dam"):
+        water_frac = round(0.4 + r3 * 0.3, 4)
+        veg_frac = round(r2 * 0.2, 4)
+    elif act == "urban_built_up":
+        built_frac = round(0.4 + r4 * 0.3, 4)
+        veg_frac = round(r2 * 0.15, 4)
+
+    ndbi_tnow = round(-0.2 + built_frac * 0.5, 4)
+    ndbi_t0 = round(-0.2 + built_frac * 0.45, 4)
+
+    # Common fields for both windows
+    common_tnow = {
+        "ndvi_tnow": ndvi_tnow,
+        "mndwi_tnow": mndwi_tnow,
+        "ndwi_tnow": mndwi_tnow,  # legacy compat
+        "ndbi_tnow": ndbi_tnow,
+        "water_frac_tnow": water_frac,
+        "veg_frac_tnow": veg_frac,
+        "built_frac_tnow": built_frac,
+        "valid_pixels_tnow": int(150 + r4 * 200),
+        "valid_fraction_tnow": round(0.7 + r2 * 0.25, 4),
+        "low_data_tnow": False,
+        "scene_count_tnow": int(8 + r4 * 10),
+    }
 
     if has_baseline and baseline_date:
         try:
             baseline_dt = dt.strptime(baseline_date, "%Y-%m-%d")
         except Exception:
             baseline_dt = dt(2023, 1, 15)
-        t0_start = (baseline_dt - timedelta(days=45)).strftime("%Y-%m-%d")
-        t0_end = (baseline_dt + timedelta(days=45)).strftime("%Y-%m-%d")
-        tnow_start = (baseline_dt + timedelta(days=180)).strftime("%Y-%m-%d")
-        tnow_end = (baseline_dt + timedelta(days=270)).strftime("%Y-%m-%d")
+
+        from app.services.gee_service import compute_intervention_windows
+        windows = compute_intervention_windows(baseline_date)
 
         return {
             "ndvi_t0": ndvi_t0,
-            "ndwi_t0": ndwi_t0,
-            "t0_start_date": t0_start,
-            "t0_end_date": t0_end,
-            "ndvi_tnow": ndvi_tnow,
-            "ndwi_tnow": ndwi_tnow,
-            "tnow_start_date": tnow_start,
-            "tnow_end_date": tnow_end,
+            "mndwi_t0": mndwi_t0,
+            "ndwi_t0": mndwi_t0,
+            "ndbi_t0": ndbi_t0,
+            "water_frac_t0": round(water_frac * (0.9 + r1 * 0.2), 4),
+            "veg_frac_t0": round(veg_frac * (0.8 + r2 * 0.2), 4),
+            "built_frac_t0": round(built_frac * (0.95 + r3 * 0.1), 4),
+            "valid_pixels_t0": int(120 + r3 * 180),
+            "valid_fraction_t0": round(0.65 + r1 * 0.25, 4),
+            "low_data_t0": False,
+            "t0_start_date": windows["baseline_start"],
+            "t0_end_date": windows["baseline_end"],
+            "scene_count_t0": int(6 + r3 * 8),
+            **common_tnow,
+            "tnow_start_date": windows["current_start"],
+            "tnow_end_date": windows["current_end"],
             "delta_ndvi": delta_v,
+            "delta_mndwi": delta_w,
             "delta_ndwi": delta_w,
             "image_count_t0": int(6 + r3 * 8),
             "image_count_tnow": int(8 + r4 * 10),
-            "source": "multi_spectral_telemetry",
+            "source": "simulated_telemetry",
         }
     else:
+        from app.services.gee_service import compute_windows
+        windows = compute_windows()
+
         return {
-            "ndvi_tnow": ndvi_tnow,
-            "ndwi_tnow": ndwi_tnow,
-            "tnow_start_date": "2024-01-01",
-            "tnow_end_date": "2024-03-31",
+            **common_tnow,
+            "tnow_start_date": windows["current_start"],
+            "tnow_end_date": windows["current_end"],
             "image_count": int(8 + r3 * 10),
-            "source": "multi_spectral_telemetry",
+            "source": "simulated_telemetry",
         }
 
 

@@ -43,16 +43,39 @@ class SatelliteData(BaseModel):
     """Satellite indices for a location."""
     ndvi_tnow: Optional[float] = None
     ndwi_tnow: Optional[float] = None
+    mndwi_tnow: Optional[float] = None
+    ndbi_tnow: Optional[float] = None
+    ndti_tnow: Optional[float] = None
+    ndci_tnow: Optional[float] = None
+    water_frac_tnow: Optional[float] = None
+    veg_frac_tnow: Optional[float] = None
+    built_frac_tnow: Optional[float] = None
+    valid_pixels_tnow: Optional[int] = None
+    valid_fraction_tnow: Optional[float] = None
+    low_data_tnow: Optional[bool] = None
     tnow_start_date: Optional[str] = None
     tnow_end_date: Optional[str] = None
+    scene_count_tnow: Optional[int] = None
 
     # Only in FULL (before/after) mode
     ndvi_t0: Optional[float] = None
     ndwi_t0: Optional[float] = None
+    mndwi_t0: Optional[float] = None
+    ndbi_t0: Optional[float] = None
+    water_frac_t0: Optional[float] = None
+    veg_frac_t0: Optional[float] = None
+    built_frac_t0: Optional[float] = None
+    valid_pixels_t0: Optional[int] = None
+    valid_fraction_t0: Optional[float] = None
+    low_data_t0: Optional[bool] = None
     t0_start_date: Optional[str] = None
     t0_end_date: Optional[str] = None
+    scene_count_t0: Optional[int] = None
+
     delta_ndvi: Optional[float] = None
     delta_ndwi: Optional[float] = None
+    delta_mndwi: Optional[float] = None
+    delta_ndbi: Optional[float] = None
 
     source: str = "gee"
 
@@ -78,7 +101,12 @@ class HealthScoreResult(BaseModel):
     score: int = Field(..., ge=0, le=100)
     grade: str  # A, B, C, D, F
     mode: str   # "full" or "snapshot"
+    surface_type: Optional[str] = None  # "water", "land", "urban"
+    label: Optional[str] = None  # UI-facing label (e.g. "Green & Blue Cover")
     components: dict[str, float]
+    grade_bands: Optional[dict] = None  # Heuristic threshold reference
+    low_data_t0: Optional[bool] = None
+    low_data_tnow: Optional[bool] = None
 
 
 class ExifInfo(BaseModel):

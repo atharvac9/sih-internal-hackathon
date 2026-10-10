@@ -40,14 +40,16 @@ class Settings(BaseSettings):
     gee_cloud_cover_max: int = 20  # max cloud cover percentage
 
     # Spatial defaults (overridable per-request)
-    default_buffer_radius_m: int = 500
+    default_buffer_radius_m: int = 250  # 250m for ad-hoc, 500m for seeded sites
     gee_scale_m: int = 10  # Sentinel-2 native resolution
 
     # Sentinel-2 band names
     band_blue: str = "B2"
     band_green: str = "B3"
     band_red: str = "B4"
+    band_red_edge: str = "B5"
     band_nir: str = "B8"
+    band_swir1: str = "B11"
 
     # ── CLIP Classifier ──────────────────────────────────────────────────────
     clip_model_name: str = "ViT-B-32"
@@ -112,21 +114,19 @@ class Settings(BaseSettings):
         },
     }
 
-    # ── Health Score Weights ─────────────────────────────────────────────────
+    # ── Health Score ─────────────────────────────────────────────────────────
+    # Surface-type-aware scoring is now in health_score.py.
+    # These legacy fields are kept for backward compatibility with old tests.
     health_weight_ndvi: float = 0.30
     health_weight_ndwi: float = 0.30
     health_weight_agreement: float = 0.25
     health_weight_confidence: float = 0.15
-
-    # Normalization range for index deltas → 0-100
     index_delta_min: float = -0.3
     index_delta_max: float = 0.3
 
-    # ── Snapshot-mode thresholds (for arbitrary points without T0) ────────
-    # These classify absolute NDVI/NDWI into a health grade
-    snapshot_ndvi_good: float = 0.3    # above this = healthy vegetation
-    snapshot_ndvi_moderate: float = 0.15
-    snapshot_ndwi_water: float = 0.0   # above this = water present
+    # ── Cloud masking ───────────────────────────────────────────────────────
+    cloud_score_threshold: float = 0.6  # cs_cdf >= this → clear pixel
+    low_data_threshold: float = 0.30    # valid_fraction < this → low_data flag
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -144,6 +144,14 @@ class Settings(BaseSettings):
     @property
     def bands_analysis(self) -> list[str]:
         return [self.band_blue, self.band_green, self.band_red, self.band_nir]
+
+    @property
+    def bands_all(self) -> list[str]:
+        """All bands needed for NDVI + MNDWI + NDBI + water-quality proxies."""
+        return [
+            self.band_blue, self.band_green, self.band_red,
+            self.band_red_edge, self.band_nir, self.band_swir1,
+        ]
 
     @property
     def t_now_end(self) -> str:

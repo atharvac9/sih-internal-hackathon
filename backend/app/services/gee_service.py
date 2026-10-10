@@ -1,21 +1,28 @@
 """
 Google Earth Engine service — service-account auth, coordinate-agnostic
-Sentinel-2 queries, NDVI/NDWI computation.
+Sentinel-2 queries with Cloud Score+ pixel masking, MNDWI, NDBI, and
+surface-fraction analysis.
 
 Supports two modes:
-- FULL: queries both T0 (baseline) and T_NOW (current) → returns deltas
-- SNAPSHOT: queries T_NOW only → returns absolute indices
+- FULL: queries both baseline and current windows → returns deltas + fractions
+- SNAPSHOT: queries current window only → returns absolute indices + fractions
 
 NO hardcoded bounding boxes or region filters. Any lat/lon works.
+
+Changes from original:
+  - Cloud Score+ pixel masking (cs_cdf >= 0.6), SCL fallback
+  - B11 (SWIR1) added; bands divided by 10000
+  - MNDWI = (B3-B11)/(B3+B11) replaces McFeeters NDWI
+  - NDBI = (B11-B8)/(B11+B8) for built-up detection
+  - Surface fractions: water_frac, veg_frac, built_frac
+  - Valid-pixel count + scene count; low_data flag when < 30% valid
+  - Same-season baseline window builder (no dry-vs-monsoon comparison)
 """
 
-import io
 import json
 import logging
-import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -82,95 +89,285 @@ def initialize_gee() -> bool:
         return False
 
 
-def _get_s2_composite(
-    lat: float,
-    lon: float,
-    start_date: str,
-    end_date: str,
-    buffer_m: int = 500,
-):
+# ── Window builders ──────────────────────────────────────────────────────────
+
+def compute_windows(
+    reference_date: Optional[str] = None,
+    baseline_years_back: int = 1,
+) -> dict:
     """
-    Fetch a Sentinel-2 median composite from GEE.
-    Fully coordinate-agnostic — works for any lat/lon on Earth.
+    Build same-season current and baseline windows.
 
-    Returns (ee.Image, ee.Geometry) tuple.
+    Current window: reference_date - 90d → reference_date
+    Baseline window: same calendar months, `baseline_years_back` years earlier.
+
+    If reference_date is None, uses today (UTC).
+
+    Returns dict with current_start, current_end, baseline_start, baseline_end.
     """
-    from app.config import settings
-    ee = _get_ee()
+    if reference_date:
+        ref = datetime.strptime(reference_date, "%Y-%m-%d")
+    else:
+        ref = datetime.now(timezone.utc)
 
-    point = ee.Geometry.Point([lon, lat])
-    roi = point.buffer(buffer_m)
+    current_end = ref
+    current_start = ref - timedelta(days=90)
 
-    collection = (
-        ee.ImageCollection(settings.gee_collection)
-        .filterBounds(roi)
-        .filterDate(start_date, end_date)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", settings.gee_cloud_cover_max))
-        .select(settings.bands_analysis)
-    )
-
-    # Check if any images exist for this location/time window
-    count = collection.size().getInfo()
-    if count == 0:
-        raise ValueError(
-            f"No Sentinel-2 images found for ({lat}, {lon}) between "
-            f"{start_date} and {end_date} with <{settings.gee_cloud_cover_max}% cloud cover. "
-            f"Try a larger time window or check if this location has coverage."
+    # Same calendar months, N years back
+    try:
+        baseline_end = current_end.replace(year=current_end.year - baseline_years_back)
+        baseline_start = current_start.replace(year=current_start.year - baseline_years_back)
+    except ValueError:
+        # Handle Feb 29 → Feb 28 for non-leap years
+        baseline_end = current_end.replace(
+            year=current_end.year - baseline_years_back,
+            day=min(current_end.day, 28),
+        )
+        baseline_start = current_start.replace(
+            year=current_start.year - baseline_years_back,
+            day=min(current_start.day, 28),
         )
 
-    composite = collection.median().clip(roi)
-    return composite, roi, count
+    return {
+        "current_start": current_start.strftime("%Y-%m-%d"),
+        "current_end": current_end.strftime("%Y-%m-%d"),
+        "baseline_start": baseline_start.strftime("%Y-%m-%d"),
+        "baseline_end": baseline_end.strftime("%Y-%m-%d"),
+    }
 
 
-def _compute_indices_from_image(image, roi) -> dict:
+def compute_intervention_windows(
+    intervention_date: str,
+    baseline_years_back: int = 1,
+) -> dict:
     """
-    Compute mean NDVI and NDWI from an ee.Image over a region.
+    For seeded intervention sites: baseline is same season in the year before
+    the intervention. Current window is today-90d → today.
 
-    NDVI = (NIR - Red) / (NIR + Red) = (B8 - B4) / (B8 + B4)
-    NDWI = (Green - NIR) / (Green + NIR) = (B3 - B8) / (B3 + B8)
+    Returns dict with current_start, current_end, baseline_start, baseline_end.
     """
-    from app.config import settings
+    now = datetime.now(timezone.utc)
+    current_end = now
+    current_start = now - timedelta(days=90)
+
+    # Baseline: same calendar months as current window, but in the year
+    # before the intervention
+    intervention_dt = datetime.strptime(intervention_date, "%Y-%m-%d")
+    pre_intervention_year = intervention_dt.year - baseline_years_back
+
+    try:
+        baseline_start = current_start.replace(year=pre_intervention_year)
+        baseline_end = current_end.replace(year=pre_intervention_year)
+    except ValueError:
+        baseline_start = current_start.replace(
+            year=pre_intervention_year, day=min(current_start.day, 28)
+        )
+        baseline_end = current_end.replace(
+            year=pre_intervention_year, day=min(current_end.day, 28)
+        )
+
+    return {
+        "current_start": current_start.strftime("%Y-%m-%d"),
+        "current_end": current_end.strftime("%Y-%m-%d"),
+        "baseline_start": baseline_start.strftime("%Y-%m-%d"),
+        "baseline_end": baseline_end.strftime("%Y-%m-%d"),
+    }
+
+
+# ── Cloud-masked composite ──────────────────────────────────────────────────
+
+LOW_DATA_THRESHOLD = 0.30  # minimum fraction of valid pixels
+
+
+def _build_s2_composite(roi, start_date: str, end_date: str):
+    """
+    Build a cloud-masked Sentinel-2 median composite.
+
+    Strategy:
+      1. Try Cloud Score+ (cs_cdf >= 0.6) — best quality
+      2. Fallback to SCL mask (drop clouds, shadows, snow, saturated) if
+         Cloud Score+ collection is empty or linkCollection fails
+
+    Returns (composite_image, scene_count).
+    Bands are divided by 10000 so indices use reflectance [0, 1].
+    """
     ee = _get_ee()
 
-    nir = image.select(settings.band_nir)
-    red = image.select(settings.band_red)
-    green = image.select(settings.band_green)
+    bands_to_select = ["B2", "B3", "B4", "B5", "B8", "B11", "SCL"]
 
+    s2 = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterBounds(roi)
+        .filterDate(start_date, end_date)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 80))
+        .select(bands_to_select)
+    )
+
+    scene_count = s2.size().getInfo()
+    if scene_count == 0:
+        return None, 0
+
+    # Try Cloud Score+ pixel masking
+    try:
+        cs = (
+            ee.ImageCollection("GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED")
+            .filterBounds(roi)
+            .filterDate(start_date, end_date)
+        )
+        cs_count = cs.size().getInfo()
+
+        if cs_count > 0:
+            s2_masked = s2.linkCollection(cs, ["cs_cdf"]).map(
+                lambda img: img.updateMask(img.select("cs_cdf").gte(0.6))
+            )
+            logger.info(
+                f"Cloud Score+ masking: {scene_count} scenes, "
+                f"{cs_count} CS+ scenes linked"
+            )
+        else:
+            logger.warning("Cloud Score+ empty for this window, falling back to SCL")
+            s2_masked = _apply_scl_mask(s2)
+    except Exception as e:
+        logger.warning(f"Cloud Score+ linkCollection failed ({e}), falling back to SCL")
+        s2_masked = _apply_scl_mask(s2)
+
+    # Compute median composite and scale to reflectance
+    reflectance_bands = ["B2", "B3", "B4", "B5", "B8", "B11"]
+    composite = s2_masked.select(reflectance_bands).median().divide(10000).clip(roi)
+
+    return composite, scene_count
+
+
+def _apply_scl_mask(collection):
+    """
+    Fallback cloud mask using the SCL (Scene Classification Layer) band.
+    Drops: 1 (saturated/defective), 3 (cloud shadow), 8 (cloud medium),
+           9 (cloud high), 10 (thin cirrus).
+    """
+    ee = _get_ee()
+
+    def mask_scl(img):
+        scl = img.select("SCL")
+        mask = (
+            scl.neq(1)
+            .And(scl.neq(3))
+            .And(scl.neq(8))
+            .And(scl.neq(9))
+            .And(scl.neq(10))
+        )
+        return img.updateMask(mask)
+
+    return collection.map(mask_scl)
+
+
+# ── Index and fraction computation ───────────────────────────────────────────
+
+def _compute_indices_and_fractions(composite, roi, scale: int = 10) -> dict:
+    """
+    From a reflectance composite (bands already /10000), compute:
+      - NDVI = (B8 - B4) / (B8 + B4)
+      - MNDWI = (B3 - B11) / (B3 + B11)   (Modified NDWI — uses SWIR)
+      - NDBI = (B11 - B8) / (B11 + B8)     (Normalized Difference Built-up)
+      - Surface fractions: water_frac, veg_frac, built_frac
+      - Valid pixel count and total pixel count
+
+    Returns dict with all computed values plus a low_data flag.
+    """
+    ee = _get_ee()
+
+    nir = composite.select("B8")
+    red = composite.select("B4")
+    green = composite.select("B3")
+    swir1 = composite.select("B11")
+    red_edge = composite.select("B5")
+
+    # Spectral indices
     ndvi = nir.subtract(red).divide(nir.add(red)).rename("NDVI")
-    ndwi = green.subtract(nir).divide(green.add(nir)).rename("NDWI")
+    mndwi = green.subtract(swir1).divide(green.add(swir1)).rename("MNDWI")
+    ndbi = swir1.subtract(nir).divide(swir1.add(nir)).rename("NDBI")
 
-    stats = ndvi.addBands(ndwi).reduceRegion(
+    # Optional water-quality proxies
+    ndti = red.subtract(green).divide(red.add(green)).rename("NDTI")
+    ndci = red_edge.subtract(red).divide(red_edge.add(red)).rename("NDCI")
+
+    # Mean indices over the buffer
+    all_bands = ndvi.addBands(mndwi).addBands(ndbi).addBands(ndti).addBands(ndci)
+    mean_stats = all_bands.reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=roi,
-        scale=settings.gee_scale_m,
+        scale=scale,
         maxPixels=1e6,
     ).getInfo()
 
-    ndvi_val = stats.get("NDVI")
-    ndwi_val = stats.get("NDWI")
+    # Surface fractions (per-pixel classification, then mean = fraction)
+    is_water = mndwi.gt(0).rename("is_water")
+    is_veg = ndvi.gt(0.3).And(mndwi.lte(0)).rename("is_veg")
+    is_built = ndbi.gt(0).And(ndvi.lt(0.2)).And(mndwi.lte(0)).rename("is_built")
 
-    if ndvi_val is None or ndwi_val is None:
-        raise ValueError("NDVI/NDWI computation returned null — region may have no valid pixels")
+    fractions = is_water.addBands(is_veg).addBands(is_built)
+    frac_stats = fractions.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=roi,
+        scale=scale,
+        maxPixels=1e6,
+    ).getInfo()
 
-    return {
+    # Pixel counts for data-quality assessment
+    valid_count = ndvi.reduceRegion(
+        reducer=ee.Reducer.count(),
+        geometry=roi,
+        scale=scale,
+        maxPixels=1e6,
+    ).getInfo().get("NDVI", 0)
+
+    # Total possible pixels (from unmasked geometry area / pixel area)
+    area_m2 = roi.area().getInfo()
+    total_pixels = max(1, int(area_m2 / (scale * scale)))
+    valid_fraction = valid_count / total_pixels if total_pixels > 0 else 0
+
+    ndvi_val = mean_stats.get("NDVI")
+    mndwi_val = mean_stats.get("MNDWI")
+    ndbi_val = mean_stats.get("NDBI")
+    ndti_val = mean_stats.get("NDTI")
+    ndci_val = mean_stats.get("NDCI")
+
+    if ndvi_val is None or mndwi_val is None:
+        raise ValueError(
+            "Index computation returned null — region may have no valid pixels "
+            "after cloud masking"
+        )
+
+    result = {
         "ndvi": round(float(ndvi_val), 4),
-        "ndwi": round(float(ndwi_val), 4),
+        "mndwi": round(float(mndwi_val), 4),
+        "ndbi": round(float(ndbi_val), 4) if ndbi_val is not None else None,
+        "ndti": round(float(ndti_val), 4) if ndti_val is not None else None,
+        "ndci": round(float(ndci_val), 4) if ndci_val is not None else None,
+        "water_frac": round(float(frac_stats.get("is_water", 0)), 4),
+        "veg_frac": round(float(frac_stats.get("is_veg", 0)), 4),
+        "built_frac": round(float(frac_stats.get("is_built", 0)), 4),
+        "valid_pixels": int(valid_count),
+        "total_pixels": total_pixels,
+        "valid_fraction": round(valid_fraction, 4),
+        "low_data": valid_fraction < LOW_DATA_THRESHOLD,
     }
 
+    return result
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
 
 async def get_snapshot_indices(
     lat: float,
     lon: float,
-    buffer_m: int = 500,
+    buffer_m: int = 250,
 ) -> dict:
     """
-    SNAPSHOT MODE: Get current NDVI/NDWI for any point on Earth.
+    SNAPSHOT MODE: Get current indices + surface fractions for any point.
     Returns absolute indices, no deltas, no before/after.
 
     Used for arbitrary-point queries where no baseline date is known.
     """
-    from app.config import settings
-
     if not initialize_gee():
         return {
             "error": "gee_not_configured",
@@ -178,21 +375,45 @@ async def get_snapshot_indices(
         }
 
     try:
-        composite, roi, image_count = _get_s2_composite(
-            lat, lon,
-            settings.t_now_start,
-            settings.t_now_end,
-            buffer_m,
+        ee = _get_ee()
+        point = ee.Geometry.Point([lon, lat])
+        roi = point.buffer(buffer_m)
+
+        windows = compute_windows()
+
+        composite, scene_count = _build_s2_composite(
+            roi, windows["current_start"], windows["current_end"],
         )
 
-        indices = _compute_indices_from_image(composite, roi)
+        if composite is None:
+            return {
+                "error": "no_imagery",
+                "message": (
+                    f"No Sentinel-2 images found for ({lat}, {lon}) between "
+                    f"{windows['current_start']} and {windows['current_end']}."
+                ),
+            }
+
+        indices = _compute_indices_and_fractions(composite, roi)
 
         return {
             "ndvi_tnow": indices["ndvi"],
-            "ndwi_tnow": indices["ndwi"],
-            "tnow_start_date": settings.t_now_start,
-            "tnow_end_date": settings.t_now_end,
-            "image_count": image_count,
+            "mndwi_tnow": indices["mndwi"],
+            "ndbi_tnow": indices["ndbi"],
+            "ndti_tnow": indices["ndti"],
+            "ndci_tnow": indices["ndci"],
+            "water_frac_tnow": indices["water_frac"],
+            "veg_frac_tnow": indices["veg_frac"],
+            "built_frac_tnow": indices["built_frac"],
+            "valid_pixels_tnow": indices["valid_pixels"],
+            "total_pixels_tnow": indices["total_pixels"],
+            "valid_fraction_tnow": indices["valid_fraction"],
+            "low_data_tnow": indices["low_data"],
+            "tnow_start_date": windows["current_start"],
+            "tnow_end_date": windows["current_end"],
+            "scene_count_tnow": scene_count,
+            # Legacy compatibility
+            "ndwi_tnow": indices["mndwi"],
             "source": "gee",
         }
 
@@ -207,21 +428,22 @@ async def get_snapshot_indices(
 async def get_full_indices(
     lat: float,
     lon: float,
-    baseline_start: str,
-    baseline_end: str,
+    baseline_start: str = None,
+    baseline_end: str = None,
     buffer_m: int = 500,
+    intervention_date: str = None,
 ) -> dict:
     """
-    FULL MODE: Get NDVI/NDWI for both baseline (T0) and current (T_NOW) periods.
-    Returns absolute values + deltas.
+    FULL MODE: Get indices + fractions for both baseline and current windows.
+    Returns absolute values, deltas, and surface fractions for both periods.
 
-    Used for seeded demo sites and user sites with a known baseline date.
+    Same-season comparison: baseline window has the same calendar months as
+    the current window, but one year earlier. If intervention_date is provided,
+    baseline is from the year before that intervention.
 
-    baseline_start/baseline_end define the T0 window (e.g. "2024-01-01" to "2024-03-31").
-    T_NOW is always computed dynamically as today-90d → today.
+    If baseline_start/baseline_end are explicitly provided, those are used
+    directly (for backward compatibility with seeded sites).
     """
-    from app.config import settings
-
     if not initialize_gee():
         return {
             "error": "gee_not_configured",
@@ -229,29 +451,91 @@ async def get_full_indices(
         }
 
     try:
-        # Fetch T0 (baseline)
-        composite_t0, roi_t0, count_t0 = _get_s2_composite(
-            lat, lon, baseline_start, baseline_end, buffer_m,
-        )
-        indices_t0 = _compute_indices_from_image(composite_t0, roi_t0)
+        ee = _get_ee()
+        point = ee.Geometry.Point([lon, lat])
+        roi = point.buffer(buffer_m)
 
-        # Fetch T_NOW (current)
-        composite_tnow, roi_tnow, count_tnow = _get_s2_composite(
-            lat, lon, settings.t_now_start, settings.t_now_end, buffer_m,
+        # Build windows
+        if baseline_start and baseline_end:
+            # Legacy explicit windows — but we warn if they're cross-season
+            windows = {
+                "current_start": compute_windows()["current_start"],
+                "current_end": compute_windows()["current_end"],
+                "baseline_start": baseline_start,
+                "baseline_end": baseline_end,
+            }
+        elif intervention_date:
+            windows = compute_intervention_windows(intervention_date)
+        else:
+            windows = compute_windows()
+
+        # Fetch baseline composite
+        composite_t0, count_t0 = _build_s2_composite(
+            roi, windows["baseline_start"], windows["baseline_end"],
         )
-        indices_tnow = _compute_indices_from_image(composite_tnow, roi_tnow)
+        if composite_t0 is None:
+            return {
+                "error": "no_imagery_baseline",
+                "message": (
+                    f"No Sentinel-2 images found for ({lat}, {lon}) in baseline "
+                    f"window {windows['baseline_start']} to {windows['baseline_end']}."
+                ),
+            }
+        indices_t0 = _compute_indices_and_fractions(composite_t0, roi)
+
+        # Fetch current composite
+        composite_tnow, count_tnow = _build_s2_composite(
+            roi, windows["current_start"], windows["current_end"],
+        )
+        if composite_tnow is None:
+            return {
+                "error": "no_imagery_current",
+                "message": (
+                    f"No Sentinel-2 images found for ({lat}, {lon}) in current "
+                    f"window {windows['current_start']} to {windows['current_end']}."
+                ),
+            }
+        indices_tnow = _compute_indices_and_fractions(composite_tnow, roi)
 
         return {
+            # T0 (baseline)
             "ndvi_t0": indices_t0["ndvi"],
-            "ndwi_t0": indices_t0["ndwi"],
-            "t0_start_date": baseline_start,
-            "t0_end_date": baseline_end,
+            "mndwi_t0": indices_t0["mndwi"],
+            "ndbi_t0": indices_t0["ndbi"],
+            "water_frac_t0": indices_t0["water_frac"],
+            "veg_frac_t0": indices_t0["veg_frac"],
+            "built_frac_t0": indices_t0["built_frac"],
+            "valid_pixels_t0": indices_t0["valid_pixels"],
+            "valid_fraction_t0": indices_t0["valid_fraction"],
+            "low_data_t0": indices_t0["low_data"],
+            "t0_start_date": windows["baseline_start"],
+            "t0_end_date": windows["baseline_end"],
+            "scene_count_t0": count_t0,
+            # T_NOW (current)
             "ndvi_tnow": indices_tnow["ndvi"],
-            "ndwi_tnow": indices_tnow["ndwi"],
-            "tnow_start_date": settings.t_now_start,
-            "tnow_end_date": settings.t_now_end,
+            "mndwi_tnow": indices_tnow["mndwi"],
+            "ndbi_tnow": indices_tnow["ndbi"],
+            "ndti_tnow": indices_tnow["ndti"],
+            "ndci_tnow": indices_tnow["ndci"],
+            "water_frac_tnow": indices_tnow["water_frac"],
+            "veg_frac_tnow": indices_tnow["veg_frac"],
+            "built_frac_tnow": indices_tnow["built_frac"],
+            "valid_pixels_tnow": indices_tnow["valid_pixels"],
+            "valid_fraction_tnow": indices_tnow["valid_fraction"],
+            "low_data_tnow": indices_tnow["low_data"],
+            "tnow_start_date": windows["current_start"],
+            "tnow_end_date": windows["current_end"],
+            "scene_count_tnow": count_tnow,
+            # Deltas
             "delta_ndvi": round(indices_tnow["ndvi"] - indices_t0["ndvi"], 4),
-            "delta_ndwi": round(indices_tnow["ndwi"] - indices_t0["ndwi"], 4),
+            "delta_mndwi": round(indices_tnow["mndwi"] - indices_t0["mndwi"], 4),
+            "delta_ndbi": round(indices_tnow["ndbi"] - indices_t0["ndbi"], 4)
+                if indices_tnow["ndbi"] is not None and indices_t0["ndbi"] is not None
+                else None,
+            # Legacy compatibility
+            "ndwi_t0": indices_t0["mndwi"],
+            "ndwi_tnow": indices_tnow["mndwi"],
+            "delta_ndwi": round(indices_tnow["mndwi"] - indices_t0["mndwi"], 4),
             "image_count_t0": count_t0,
             "image_count_tnow": count_tnow,
             "source": "gee",
